@@ -458,5 +458,12 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateProgressEstimate: () =>
+      Effect.fail(
+        new TextGenerationError({
+          operation: "generateProgressEstimate",
+          detail: "OpenCode does not support progress estimates.",
+        }),
+      ),
   } satisfies TextGeneration.TextGeneration["Service"];
 });

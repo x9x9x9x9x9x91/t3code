@@ -410,5 +410,12 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateProgressEstimate: () =>
+      Effect.fail(
+        new TextGenerationError({
+          operation: "generateProgressEstimate",
+          detail: "Antigravity does not support progress estimates.",
+        }),
+      ),
   } satisfies TextGeneration.TextGeneration["Service"];
 });

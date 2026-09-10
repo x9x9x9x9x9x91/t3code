@@ -440,6 +440,7 @@ export function projectEvent(
             settledAt: null,
             unsettledAt: null,
             activeOrderKey: null,
+            progressEstimate: null,
             snoozedUntil: null,
             snoozedAt: null,
             deletedAt: null,
@@ -625,6 +626,9 @@ export function projectEvent(
               ...(payload.worktreePath !== undefined ? { worktreePath: payload.worktreePath } : {}),
               ...(payload.activeOrderKey !== undefined
                 ? { activeOrderKey: payload.activeOrderKey }
+                : {}),
+              ...(payload.progressEstimate !== undefined
+                ? { progressEstimate: payload.progressEstimate }
                 : {}),
               ...(payload.branchPullRequest !== undefined
                 ? { branchPullRequest: payload.branchPullRequest }

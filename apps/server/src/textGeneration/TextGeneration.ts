@@ -77,6 +77,17 @@ export interface ThreadTitleGenerationResult {
   needsRefinement?: boolean | undefined;
 }
 
+export interface ProgressEstimateGenerationInput {
+  cwd: string;
+  context: string;
+  modelSelection: ModelSelection;
+}
+
+export interface ProgressEstimateGenerationResult {
+  percent: number;
+  summary: string;
+}
+
 /**
  * TextGeneration - Service tag for commit and change request text generation.
  */
@@ -108,6 +119,11 @@ export class TextGeneration extends Context.Service<
     readonly generateThreadTitle: (
       input: ThreadTitleGenerationInput,
     ) => Effect.Effect<ThreadTitleGenerationResult, TextGenerationError>;
+
+    /** Estimate completion of the overall thread goal. */
+    readonly generateProgressEstimate: (
+      input: ProgressEstimateGenerationInput,
+    ) => Effect.Effect<ProgressEstimateGenerationResult, TextGenerationError>;
   }
 >()("t3/textGeneration/TextGeneration") {}
 
@@ -115,7 +131,8 @@ type TextGenerationOp =
   | "generateCommitMessage"
   | "generatePrContent"
   | "generateBranchName"
-  | "generateThreadTitle";
+  | "generateThreadTitle"
+  | "generateProgressEstimate";
 
 const resolveInstance = (
   registry: ProviderInstanceRegistry.ProviderInstanceRegistry["Service"],
@@ -167,6 +184,10 @@ export const make = Effect.gen(function* () {
             return yield* textGeneration.generateThreadTitle({ ...input, linkedContext });
           }),
         ),
+      ),
+    generateProgressEstimate: (input) =>
+      resolveInstance(registry, "generateProgressEstimate", input.modelSelection.instanceId).pipe(
+        Effect.flatMap((textGeneration) => textGeneration.generateProgressEstimate(input)),
       ),
   });
 });

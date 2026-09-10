@@ -2,6 +2,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 
@@ -14,7 +15,12 @@ import {
   ProjectionThreadRepository,
   type ProjectionThreadRepositoryShape,
 } from "../Services/ProjectionThreads.ts";
-import { ModelSelection, ThreadLinkedPullRequest, ThreadTitleState } from "@t3tools/contracts";
+import {
+  ModelSelection,
+  ThreadLinkedPullRequest,
+  ThreadProgressEstimate,
+  ThreadTitleState,
+} from "@t3tools/contracts";
 
 const ProjectionThreadDbRow = ProjectionThread.mapFields(
   Struct.assign({
@@ -22,6 +28,9 @@ const ProjectionThreadDbRow = ProjectionThread.mapFields(
     titleState: Schema.NullOr(Schema.fromJsonString(ThreadTitleState)),
     linkedPullRequest: Schema.NullOr(Schema.fromJsonString(ThreadLinkedPullRequest)),
     branchPullRequest: Schema.NullOr(Schema.fromJsonString(ThreadLinkedPullRequest)),
+    progressEstimate: Schema.NullOr(Schema.fromJsonString(ThreadProgressEstimate)).pipe(
+      Schema.catchDecoding(() => Effect.succeed(Option.some(null))),
+    ),
   }),
 );
 type ProjectionThreadDbRow = typeof ProjectionThreadDbRow.Type;
@@ -57,6 +66,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           pinned_at,
           pin_order_key,
           active_order_key,
+          progress_estimate,
           title_regeneration_request_id,
           title_regeneration_started_at,
           latest_user_message_at,
@@ -89,6 +99,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           ${row.pinnedAt},
           ${row.pinOrderKey ?? null},
           ${row.activeOrderKey ?? null},
+          ${row.progressEstimate == null ? null : JSON.stringify(row.progressEstimate)},
           ${row.titleRegenerationRequestId ?? null},
           ${row.titleRegenerationStartedAt ?? null},
           ${row.latestUserMessageAt},
@@ -121,6 +132,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           pinned_at = excluded.pinned_at,
           pin_order_key = excluded.pin_order_key,
           active_order_key = excluded.active_order_key,
+          progress_estimate = excluded.progress_estimate,
           title_regeneration_request_id = excluded.title_regeneration_request_id,
           title_regeneration_started_at = excluded.title_regeneration_started_at,
           latest_user_message_at = excluded.latest_user_message_at,
@@ -160,6 +172,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           pinned_at AS "pinnedAt",
           pin_order_key AS "pinOrderKey",
           active_order_key AS "activeOrderKey",
+          progress_estimate AS "progressEstimate",
           title_regeneration_request_id AS "titleRegenerationRequestId",
           title_regeneration_started_at AS "titleRegenerationStartedAt",
           latest_user_message_at AS "latestUserMessageAt",
@@ -201,6 +214,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           pinned_at AS "pinnedAt",
           pin_order_key AS "pinOrderKey",
           active_order_key AS "activeOrderKey",
+          progress_estimate AS "progressEstimate",
           title_regeneration_request_id AS "titleRegenerationRequestId",
           title_regeneration_started_at AS "titleRegenerationStartedAt",
           latest_user_message_at AS "latestUserMessageAt",

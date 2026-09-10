@@ -751,6 +751,7 @@ describe("ServerSettings.sourceControlWritingStyle", () => {
       followChangeRequestTemplates: true,
     });
     expect(settings.sourceControlWriterModelSelection).toBeNull();
+    expect(settings.progressEstimateModelSelection).toBeNull();
   });
 
   it("trims partial style updates", () => {

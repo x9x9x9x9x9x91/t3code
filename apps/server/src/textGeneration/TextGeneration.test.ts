@@ -24,6 +24,8 @@ const makeStubTextGeneration = (
     generatePrContent: () => Effect.die("generatePrContent stub not configured for this test"),
     generateBranchName: () => Effect.die("generateBranchName stub not configured for this test"),
     generateThreadTitle: () => Effect.die("generateThreadTitle stub not configured for this test"),
+    generateProgressEstimate: () =>
+      Effect.die("generateProgressEstimate stub not configured for this test"),
     ...overrides,
   });
 
@@ -140,6 +142,49 @@ describe("TextGeneration.make", () => {
 
       expect(result.branch).toBe("personal-branch");
       expect(personalCalls).toEqual(["Refactor the routing layer"]);
+    }),
+  );
+
+  it.effect("routes progress estimates through the selected instance", () =>
+    Effect.gen(function* () {
+      const instanceId = ProviderInstanceId.make("codex_progress");
+      const input = {
+        cwd: process.cwd(),
+        context: "USER:\nFinish the feature",
+        modelSelection: createModelSelection(instanceId, "gpt-5"),
+      };
+      const calls: TextGeneration.ProgressEstimateGenerationInput[] = [];
+      const instance = makeStubInstance(
+        instanceId,
+        makeStubTextGeneration({
+          generateProgressEstimate: (value) => {
+            calls.push(value);
+            return Effect.succeed({ percent: 50, summary: "Tests remain." });
+          },
+        }),
+      );
+      const makeService = (instances: ReadonlyArray<ProviderInstance>) =>
+        TextGeneration.make.pipe(
+          Effect.provideService(
+            ProviderInstanceRegistry.ProviderInstanceRegistry,
+            makeStubRegistry(instances),
+          ),
+          Effect.provide(
+            Layer.mock(SourceControlProviderRegistry.SourceControlProviderRegistry)({
+              resolveLink: () => Effect.die("No link lookup expected"),
+            }),
+          ),
+        );
+      const service = yield* makeService([instance]);
+      expect(yield* service.generateProgressEstimate(input)).toEqual({
+        percent: 50,
+        summary: "Tests remain.",
+      });
+      expect(calls).toEqual([input]);
+      const missing = yield* makeService([]);
+      const error = yield* missing.generateProgressEstimate(input).pipe(Effect.flip);
+      expect(error.operation).toBe("generateProgressEstimate");
+      expect(error.detail).toContain(instanceId);
     }),
   );
 

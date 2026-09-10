@@ -1934,6 +1934,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               ) : (
                 <span className="flex-1" />
               )}
+              {thread.settledOverride !== "settled" &&
+              thread.settledAt === null &&
+              thread.progressEstimate ? (
+                // oxlint-disable-next-line t3code/no-native-title-tooltip -- Progress estimates intentionally use a native summary tooltip.
+                <span className="shrink-0 tabular-nums" title={thread.progressEstimate.summary}>
+                  {thread.progressEstimate.percent}%
+                </span>
+              ) : null}
               {terminalStatusIcon}
               {prBadge}
               {diff ? (
@@ -4842,14 +4850,7 @@ export default function Sidebar() {
                               >
                                 <div className="absolute inset-x-0 top-0 flex h-7 items-center gap-2 px-2 text-xs font-medium text-sidebar-muted-foreground">
                                   {project ? (
-                                    <ProjectFavicon
-                                      environmentId={project.environmentId}
-                                      cwd={project.workspaceRoot}
-                                      projectName={project.title}
-                                      faviconPath={project.faviconPath}
-                                      projectIcon={project.projectIcon}
-                                      className="size-3 shrink-0"
-                                    />
+                                    <ProjectFavicon project={project} className="size-3 shrink-0" />
                                   ) : null}
                                   <span className="truncate">
                                     {project?.displayName ?? "Unknown project"}

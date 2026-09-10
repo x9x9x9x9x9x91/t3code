@@ -327,3 +327,23 @@ export function buildThreadTitlePrompt(input: ThreadTitlePromptInput) {
 
   return { prompt, outputSchema };
 }
+
+export function buildProgressEstimatePrompt(input: { context: string }) {
+  const prompt = `You are estimating how complete a coding-agent thread is relative to its OVERALL goal.
+The goal includes everything the user asked across the whole thread, including later follow-ups and scope changes.
+A thread that finished its first task and then received a new request is NOT 100%.
+Percent is progress toward that whole, not toward the current step.
+100 means every request has been delivered and verified with nothing outstanding; 0 means nothing has been done yet.
+Weigh explicit user requests, what the assistant reports as done versus pending, unresolved questions to the user, and failing checks.
+Be calibrated, not optimistic. Do not count plans as done.
+Return JSON { "percent": integer 0-100, "summary": one sentence naming what remains }.
+
+Thread contents:
+${input.context}`;
+  const outputSchema = Schema.Struct({
+    percent: Schema.Number,
+    summary: Schema.String,
+  });
+
+  return { prompt, outputSchema };
+}

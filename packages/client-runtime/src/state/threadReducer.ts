@@ -131,6 +131,7 @@ export function applyThreadDetailEvent(
           settledAt: null,
           unsettledAt: null,
           activeOrderKey: null,
+          progressEstimate: null,
           snoozedUntil: null,
           snoozedAt: null,
           deletedAt: null,
@@ -277,6 +278,9 @@ export function applyThreadDetailEvent(
             : {}),
           ...(event.payload.activeOrderKey !== undefined
             ? { activeOrderKey: event.payload.activeOrderKey }
+            : {}),
+          ...(event.payload.progressEstimate !== undefined
+            ? { progressEstimate: event.payload.progressEstimate }
             : {}),
           updatedAt: event.payload.updatedAt,
         },

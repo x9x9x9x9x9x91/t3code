@@ -633,6 +633,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             pinnedAt: null,
             pinOrderKey: null,
             activeOrderKey: null,
+            progressEstimate: null,
             titleRegenerationRequestId: null,
             titleRegenerationStartedAt: null,
             latestUserMessageAt: null,
@@ -812,6 +813,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               : {}),
             ...(event.payload.titleState !== undefined
               ? { titleState: event.payload.titleState }
+              : {}),
+            ...(event.payload.progressEstimate !== undefined
+              ? { progressEstimate: event.payload.progressEstimate }
               : {}),
             ...(event.payload.titleRegeneration !== undefined
               ? {
