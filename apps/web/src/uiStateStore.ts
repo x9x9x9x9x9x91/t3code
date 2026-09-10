@@ -22,6 +22,7 @@ const LEGACY_PERSISTED_STATE_KEYS = [
 export interface PersistedUiState {
   projectExpandedById?: Record<string, boolean>;
   projectOrder?: string[];
+  sidebarActiveGroupOrder?: string[];
   threadLastVisitedAtById?: Record<string, string>;
   collapsedProjectCwds?: string[];
   expandedProjectCwds?: string[];
@@ -36,6 +37,7 @@ export interface PersistedUiState {
 export interface UiProjectState {
   projectExpandedById: Record<string, boolean>;
   projectOrder: string[];
+  sidebarActiveGroupOrder: string[];
   // Logical project key the sidebar list is scoped to, or null for "all
   // projects". Lives here so routes that unmount the sidebar (Settings)
   // cannot reset the filter.
@@ -61,6 +63,7 @@ export interface UiState
 const initialState: UiState = {
   projectExpandedById: {},
   projectOrder: [],
+  sidebarActiveGroupOrder: [],
   sidebarProjectScopeKey: null,
   threadLastVisitedAtById: {},
   threadChangedFilesExpandedById: {},
@@ -148,6 +151,7 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
   return {
     projectExpandedById,
     projectOrder,
+    sidebarActiveGroupOrder: sanitizeStringArray(parsed.sidebarActiveGroupOrder),
     threadLastVisitedAtById: sanitizeTimestampRecord(parsed.threadLastVisitedAtById),
     threadChangedFilesExpandedById:
       parsed.threadChangedFilesExpansionVersion === THREAD_CHANGED_FILES_EXPANSION_VERSION
@@ -226,6 +230,7 @@ export function persistState(state: UiState): void {
       JSON.stringify({
         projectExpandedById,
         projectOrder: state.projectOrder,
+        sidebarActiveGroupOrder: state.sidebarActiveGroupOrder,
         threadLastVisitedAtById: state.threadLastVisitedAtById,
         defaultAdvertisedEndpointKey: state.defaultAdvertisedEndpointKey,
         sidebarProjectScopeKey: state.sidebarProjectScopeKey,
@@ -423,7 +428,34 @@ export function reorderProjects(
   };
 }
 
+export function moveSidebarActiveGroup(
+  state: UiState,
+  currentGroupOrder: readonly string[],
+  groupKey: string,
+  direction: "up" | "down",
+): UiState {
+  const index = currentGroupOrder.indexOf(groupKey);
+  const targetIndex = index + (direction === "up" ? -1 : 1);
+  if (index < 0 || targetIndex < 0 || targetIndex >= currentGroupOrder.length) {
+    return state;
+  }
+
+  // Materialise the visible order before the first manual move.
+  const sidebarActiveGroupOrder = [...currentGroupOrder];
+  sidebarActiveGroupOrder[index] = currentGroupOrder[targetIndex]!;
+  sidebarActiveGroupOrder[targetIndex] = groupKey;
+  return {
+    ...state,
+    sidebarActiveGroupOrder,
+  };
+}
+
 interface UiStateStore extends UiState {
+  moveSidebarActiveGroup: (
+    currentGroupOrder: readonly string[],
+    groupKey: string,
+    direction: "up" | "down",
+  ) => void;
   markThreadVisited: (threadId: string, visitedAt: string) => void;
   markThreadUnread: (threadId: string, latestTurnCompletedAt: string | null | undefined) => void;
   setThreadChangedFilesExpanded: (threadId: string, turnId: string, expanded: boolean) => void;
@@ -440,6 +472,8 @@ interface UiStateStore extends UiState {
 
 export const useUiStateStore = create<UiStateStore>((set) => ({
   ...readPersistedState(),
+  moveSidebarActiveGroup: (currentGroupOrder, groupKey, direction) =>
+    set((state) => moveSidebarActiveGroup(state, currentGroupOrder, groupKey, direction)),
   markThreadVisited: (threadId, visitedAt) =>
     set((state) => markThreadVisited(state, threadId, visitedAt)),
   markThreadUnread: (threadId, latestTurnCompletedAt) =>

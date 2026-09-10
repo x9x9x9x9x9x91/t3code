@@ -5,6 +5,7 @@ import {
   legacyProjectCwdPreferenceKey,
   markThreadUnread,
   markThreadVisited,
+  moveSidebarActiveGroup,
   parsePersistedState,
   PERSISTED_STATE_KEY,
   type PersistedUiState,
@@ -22,6 +23,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
   return {
     projectExpandedById: {},
     projectOrder: [],
+    sidebarActiveGroupOrder: [],
     sidebarProjectScopeKey: null,
     threadLastVisitedAtById: {},
     threadChangedFilesExpandedById: {},
@@ -119,6 +121,47 @@ describe("uiStateStore pure functions", () => {
     );
   });
 
+  it.each([
+    ["b", "up", ["b", "a", "c"]],
+    ["b", "down", ["a", "c", "b"]],
+  ] as const)("moves active project %s %s", (groupKey, direction, expected) => {
+    const currentOrder = ["a", "b", "c"];
+    const state = makeUiState({ sidebarActiveGroupOrder: currentOrder });
+
+    const next = moveSidebarActiveGroup(state, currentOrder, groupKey, direction);
+
+    expect(next.sidebarActiveGroupOrder).toEqual(expected);
+    expect(state.sidebarActiveGroupOrder).toEqual(["a", "b", "c"]);
+    expect(next.projectOrder).toBe(state.projectOrder);
+  });
+
+  it.each([{ savedOrder: [] }, { savedOrder: ["stale", "c"] }])(
+    "materialises the visual order before swapping from %j",
+    ({ savedOrder }) => {
+      const state = makeUiState({ sidebarActiveGroupOrder: savedOrder });
+      const next = moveSidebarActiveGroup(state, ["c", "a", "b"], "a", "down");
+
+      expect(next.sidebarActiveGroupOrder).toEqual(["c", "b", "a"]);
+      expect(
+        moveSidebarActiveGroup(next, next.sidebarActiveGroupOrder, "a", "up")
+          .sidebarActiveGroupOrder,
+      ).toEqual(["c", "a", "b"]);
+    },
+  );
+
+  it.each([
+    [["a", "b"], "a", "up"],
+    [["a", "b"], "b", "down"],
+    [["a"], "a", "up"],
+    [["a"], "a", "down"],
+    [["a"], "missing", "down"],
+    [[], "a", "up"],
+  ] as const)("does not move beyond the ends of %j for %s %s", (order, key, direction) => {
+    const state = makeUiState();
+
+    expect(moveSidebarActiveGroup(state, order, key, direction)).toBe(state);
+  });
+
   it("stores explicit changed-file expansion choices", () => {
     const threadId = ThreadId.make("thread-1");
     const collapsed = setThreadChangedFilesExpanded(makeUiState(), threadId, "turn-1", false);
@@ -197,6 +240,7 @@ describe("parsePersistedState", () => {
         logical: false,
       },
       projectOrder: ["physical-b", "physical-a"],
+      sidebarActiveGroupOrder: [],
       threadLastVisitedAtById: {
         "environment:thread-1": "2026-02-25T12:35:00.000Z",
       },
@@ -210,6 +254,14 @@ describe("parsePersistedState", () => {
         },
       },
     });
+  });
+
+  it("sanitises active project order and defaults older state to no preference", () => {
+    expect(
+      parsePersistedState({ sidebarActiveGroupOrder: ["b", "", "a", "b", 4 as unknown as string] })
+        .sidebarActiveGroupOrder,
+    ).toEqual(["b", "a"]);
+    expect(parsePersistedState({}).sidebarActiveGroupOrder).toEqual([]);
   });
 
   it.each([undefined, 1])("ignores changed-file expansion version %s", (version) => {
@@ -297,6 +349,7 @@ describe("uiStateStore persistence", () => {
         logical: false,
       },
       projectOrder: ["physical-b", "physical-a"],
+      sidebarActiveGroupOrder: [],
       threadLastVisitedAtById: {
         "environment:thread-1": "2026-02-25T12:35:00.000Z",
       },
@@ -319,6 +372,7 @@ describe("uiStateStore persistence", () => {
         logical: false,
       },
       projectOrder: ["physical-b", "physical-a"],
+      sidebarActiveGroupOrder: [],
       threadLastVisitedAtById: {
         "environment:thread-1": "2026-02-25T12:35:00.000Z",
       },
@@ -336,6 +390,17 @@ describe("uiStateStore persistence", () => {
     expect(parsePersistedState(persisted)).toEqual({
       ...state,
     });
+  });
+
+  it("restores a moved active cluster order across reloads", () => {
+    const state = moveSidebarActiveGroup(makeUiState(), ["a", "b", "c"], "b", "up");
+    persistState(state);
+
+    const persisted = JSON.parse(
+      localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
+    ) as PersistedUiState;
+    expect(persisted.sidebarActiveGroupOrder).toEqual(["b", "a", "c"]);
+    expect(parsePersistedState(persisted)).toEqual(state);
   });
 
   it("restores the sidebar project scope across reloads", () => {

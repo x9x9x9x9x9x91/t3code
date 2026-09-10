@@ -33,9 +33,10 @@ On web and desktop, pinning or unpinning a thread keeps the sidebar at your curr
 scroll position instead of following the thread to its new place in the list.
 
 On web and desktop, turn on **Settings → General → Group active threads by project**
-to cluster the active list under a header per project. Repositories merged by
-**Project grouping** share a header. Dragging still reorders inside a cluster and
-across sections.
+to cluster the active list with a gap between projects. Repositories merged by
+**Project grouping** share a cluster. Right-click an active thread and choose
+**Move project up** or **Move project down** to reorder its whole cluster. Dragging
+still reorders threads inside a cluster and across sections.
 
 Pinning does not prevent automatic settlement. Settling a thread removes its pin.
 

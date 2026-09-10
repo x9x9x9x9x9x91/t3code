@@ -4,9 +4,11 @@ import { verticalListSortingStrategy, type SortingStrategy } from "@dnd-kit/sort
 import {
   createSidebarCollisionDetection,
   createSidebarSortingStrategy,
+  PROJECT_GAP_HEIGHT,
   restrictBelowSidebarLabel,
 } from "./Sidebar.drag";
 import {
+  groupSidebarActiveThreads,
   resolveSidebarDropTarget,
   sidebarListItemId,
   sidebarMarkerId,
@@ -21,9 +23,9 @@ const thread = (key: string, section: SidebarSection, group?: string): SidebarLi
   section,
   ...(group === undefined ? {} : { group }),
 });
-const projectHeader = (group: string): SidebarListItem => ({
+const projectGap = (group: string): SidebarListItem => ({
   kind: "marker",
-  marker: "project-header",
+  marker: "project-gap",
   group,
 });
 const marker = (marker: SidebarListMarker): SidebarListItem => ({ kind: "marker", marker });
@@ -41,15 +43,25 @@ function layout(
 ) {
   let top = 100;
   const rects = items.map((item) => {
-    const height =
-      item.kind === "thread"
+    const pendingGap =
+      item.kind === "marker" &&
+      item.marker === "project-gap" &&
+      !items.some(
+        (row) => row.kind === "thread" && row.section === "active" && row.group === item.group,
+      );
+    const height = pendingGap
+      ? 0
+      : item.kind === "thread"
         ? (item.section === "pinned" || item.section === "active" ? cardHeight : 36) * scale
         : item.marker === "pinned-header" || item.marker === "pinned-divider"
           ? 0
-          : (item.marker.endsWith("placeholder") ? 0 : item.marker === "project-header" ? 28 : 32) *
-            scale;
+          : (item.marker.endsWith("placeholder")
+              ? 0
+              : item.marker === "project-gap"
+                ? PROJECT_GAP_HEIGHT
+                : 32) * scale;
     const rect = { top, height, bottom: top + height, left: 0, right: 260, width: 260 };
-    top += height + 1;
+    top += height + (pendingGap ? 0 : 1);
     return rect;
   });
   const activeIndex = items.findIndex((item) => sidebarListItemId(item) === active);
@@ -294,101 +306,206 @@ describe("sidebar drag projection", () => {
   const groupedItems = [
     pinnedHeader,
     divider,
-    projectHeader("repo:a"),
     thread("a1", "active", "repo:a"),
     thread("a2", "active", "repo:a"),
-    projectHeader("repo:b"),
+    projectGap("repo:b"),
     thread("b1", "active", "repo:b"),
     settledHeader,
   ];
 
-  it.each([0.8, 1, 1.25])(
-    "stacks project headers with their measured heights at scale %s",
-    (scale) => {
-      const over = sidebarMarkerId("project-header", "repo:a");
+  it.each([0.8, 1, 1.25])("stacks project gaps at scale %s with no leading gap", (scale) => {
+    const result = preview(
+      { items: groupedItems, settledOrder: [], settledExpanded: true },
+      "a2",
+      "a1",
+      scale,
+    );
+    const args = layout(groupedItems, "a2", "a1", scale);
+    const topOf = (id: string) => {
+      const index = groupedItems.findIndex((item) => sidebarListItemId(item) === id);
+      expect(result.get(id)?.scaleY).toBe(1);
+      return args.rects[index]!.top + result.get(id)!.y;
+    };
+    expect(topOf("a1")).toBeCloseTo(102 + 82 * scale + 1);
+    const gap = topOf(sidebarMarkerId("project-gap", "repo:b"));
+    expect(gap - topOf("a1")).toBeCloseTo(82 * scale + 1);
+    expect(topOf("b1") - gap).toBeCloseTo(PROJECT_GAP_HEIGHT * scale + 1);
+    expect(topOf(sidebarMarkerId("settled-header")) - topOf("b1")).toBeCloseTo(82 * scale + 1);
+  });
+
+  it.each(["b1", sidebarMarkerId("project-gap", "repo:b")])(
+    "returns a row dragged across %s to its own cluster at its new rank",
+    (over) => {
       const result = preview(
         { items: groupedItems, settledOrder: [], settledExpanded: true },
-        "b1",
+        "a1",
         over,
-        scale,
       );
-      const args = layout(groupedItems, "b1", over, scale);
-      const topOf = (id: string) => {
-        const index = groupedItems.findIndex((item) => sidebarListItemId(item) === id);
-        expect(result.get(id)?.scaleY).toBe(1);
-        return args.rects[index]!.top + result.get(id)!.y;
-      };
-      const headerB = topOf(sidebarMarkerId("project-header", "repo:b"));
-      expect(headerB).toBe(102);
-      const headerA = topOf(sidebarMarkerId("project-header", "repo:a"));
-      expect(headerA - headerB).toBeCloseTo((28 + 82) * scale + 2);
-      expect(topOf("a1") - headerA).toBeCloseTo(28 * scale + 1);
-      expect(topOf("a2") - topOf("a1")).toBeCloseTo(82 * scale + 1);
-      expect(topOf(sidebarMarkerId("settled-header")) - topOf("a2")).toBeCloseTo(82 * scale + 1);
+      expect(resolveSidebarDropTarget(groupedItems, "a1", over)?.activeOrder).toEqual([
+        "a2",
+        "a1",
+        "b1",
+      ]);
+      expect(result.get("a2")).toEqual({ ...stationary, y: -83 });
+      expect(result.get("b1")).toEqual(stationary);
+      expect(result.get(sidebarMarkerId("project-gap", "repo:b"))).toEqual(stationary);
     },
   );
 
-  it("returns a row dragged past another project to its own cluster at its new rank", () => {
+  it("keeps first-appearance ordering for a drop before any manual cluster move", () => {
     const result = preview(
       { items: groupedItems, settledOrder: [], settledExpanded: true },
-      "a1",
       "b1",
+      "a1",
     );
-    expect(resolveSidebarDropTarget(groupedItems, "a1", "b1")?.activeOrder).toEqual([
-      "a2",
-      "a1",
+
+    expect(resolveSidebarDropTarget(groupedItems, "b1", "a1")?.activeOrder).toEqual([
       "b1",
+      "a1",
+      "a2",
     ]);
-    expect(result.get("a2")).toEqual({ ...stationary, y: -83 });
-    expect(result.get("b1")).toEqual(stationary);
-    for (const group of ["repo:a", "repo:b"]) {
-      expect(result.get(sidebarMarkerId("project-header", group))).toEqual(stationary);
-    }
+    expect(result.get(sidebarMarkerId("project-gap", "repo:b"))?.scaleY).toBe(0);
+    expect(result.get("a1")?.y).toBe(83 + PROJECT_GAP_HEIGHT + 1);
+    expect(result.get("a2")?.y).toBe(83 + PROJECT_GAP_HEIGHT + 1);
+    expect(result.get(sidebarMarkerId("settled-header"))).toEqual(stationary);
   });
 
-  it("removes the empty cluster when its last row leaves Active", () => {
+  it("preserves preferred cluster order when a row crosses above the first cluster", () => {
+    const result = preview(
+      {
+        items: groupedItems,
+        activeGroupOrder: ["repo:a", "repo:b"],
+        settledOrder: [],
+        settledExpanded: true,
+      },
+      "b1",
+      "a1",
+    );
+
+    expect(
+      resolveSidebarDropTarget(groupedItems, "b1", "a1", ["repo:a", "repo:b"])?.activeOrder,
+    ).toEqual(["a1", "a2", "b1"]);
+    expect(result.get("a1")).toEqual(stationary);
+    expect(result.get("a2")).toEqual(stationary);
+    expect(result.get(sidebarMarkerId("project-gap", "repo:b"))).toEqual(stationary);
+  });
+
+  it("removes the gap when the last cluster leaves Active", () => {
     const result = preview(
       { items: groupedItems, settledOrder: [], settledExpanded: false },
       "b1",
       sidebarMarkerId("pinned-header"),
     );
-    expect(result.get(sidebarMarkerId("project-header", "repo:b"))?.scaleY).toBe(0);
-    expect(result.get(sidebarMarkerId("project-header", "repo:a"))).toEqual({
-      ...stationary,
-      y: 83,
-    });
-    expect(result.get(sidebarMarkerId("settled-header"))?.y).toBe(-29);
+    expect(result.get(sidebarMarkerId("project-gap", "repo:b"))?.scaleY).toBe(0);
+    expect(result.get("a1")).toEqual({ ...stationary, y: 83 });
+    expect(result.get(sidebarMarkerId("settled-header"))?.y).toBe(-11);
   });
 
-  it("opens a new cluster header for an incoming pinned row using the slim fallback", () => {
+  it("removes the leading gap when the first cluster leaves Active", () => {
+    const items = groupedItems.filter((item) => sidebarListItemId(item) !== "a2");
+    const result = preview(
+      { items, settledOrder: [], settledExpanded: false },
+      "a1",
+      sidebarMarkerId("pinned-header"),
+    );
+
+    expect(result.get(sidebarMarkerId("project-gap", "repo:b"))?.scaleY).toBe(0);
+    expect(result.get("b1")?.y).toBe(-11);
+    expect(result.get(sidebarMarkerId("settled-header"))?.y).toBe(-11);
+  });
+
+  it.each([0.8, 1, 1.25])("opens a zero-height pending gap at scale %s", (scale) => {
     const items = [
       pinnedHeader,
       thread("p", "pinned", "repo:b"),
       divider,
-      projectHeader("repo:a"),
       thread("a", "active", "repo:a"),
-      projectHeader("repo:b"),
+      projectGap("repo:b"),
       settledHeader,
     ];
-    const strategy = createSidebarSortingStrategy({
-      items,
-      settledOrder: [],
-      settledExpanded: false,
-    });
-    const args = layout(items, "p", "a");
-    const pendingIndex = 5;
-    args.rects[pendingIndex] = {
-      ...args.rects[pendingIndex]!,
-      height: 0,
-      bottom: args.rects[pendingIndex]!.top,
-    };
-    args.rects[6] = {
-      ...args.rects[6]!,
-      top: args.rects[6]!.top - 28,
-      bottom: args.rects[6]!.bottom - 28,
-    };
-    expect(strategy({ ...args, index: pendingIndex })).toEqual({ ...stationary, y: -83 });
-    expect(strategy({ ...args, index: 6 })?.y).toBe(28);
+    const over = sidebarMarkerId("project-gap", "repo:b");
+    const result = preview({ items, settledOrder: [], settledExpanded: false }, "p", over, scale);
+
+    expect(resolveSidebarDropTarget(items, "p", over)?.activeOrder).toEqual(["a", "p"]);
+    expect(result.get(over)?.scaleY).toBe(1);
+    expect(result.get(over)?.y).toBeCloseTo(-(82 * scale + 1));
+    expect(result.get(sidebarMarkerId("settled-header"))?.y).toBeCloseTo(
+      PROJECT_GAP_HEIGHT * scale + 1,
+    );
+  });
+
+  it.each(["pinned", "snoozed", "settled"] as const)(
+    "previews a returning project's saved position when it enters from %s",
+    (source) => {
+      const incoming = thread("incoming", source, "repo:b");
+      const items = [
+        pinnedHeader,
+        ...(source === "pinned" ? [incoming] : []),
+        divider,
+        thread("a", "active", "repo:a"),
+        projectGap("repo:b"),
+        ...(source === "snoozed" ? [marker("snoozed-header"), incoming] : []),
+        settledHeader,
+        ...(source === "settled" ? [incoming] : []),
+      ];
+      const activeGroupOrder = ["repo:b", "repo:a"];
+      const over = sidebarMarkerId("project-gap", "repo:b");
+      const result = preview(
+        { items, activeGroupOrder, settledOrder: [], settledExpanded: false },
+        "incoming",
+        over,
+      );
+      const target = resolveSidebarDropTarget(items, "incoming", over, activeGroupOrder)!;
+
+      expect(target.activeOrder).toEqual(["incoming", "a"]);
+      expect(result.get(over)?.scaleY).toBe(0);
+      const args = layout(items, "incoming", over);
+      const aIndex = items.findIndex((item) => sidebarListItemId(item) === "a");
+      // The returning project leads; a new gap precedes the existing project.
+      expect(args.rects[aIndex]!.top + result.get("a")!.y).toBe(102 + 83 + PROJECT_GAP_HEIGHT + 1);
+    },
+  );
+
+  it("previews a reordered cluster list in the same order the committed rows render", () => {
+    const rows = [
+      { kind: "thread", key: "a1", section: "active", group: "a" },
+      { kind: "thread", key: "b1", section: "active", group: "b" },
+      { kind: "thread", key: "a2", section: "active", group: "a" },
+    ] as const;
+    const activeGroupOrder = ["b", "a"];
+    const items = [
+      pinnedHeader,
+      divider,
+      ...groupSidebarActiveThreads(rows, activeGroupOrder),
+      settledHeader,
+    ];
+    const result = preview(
+      { items, activeGroupOrder, settledOrder: [], settledExpanded: false },
+      "a2",
+      "a1",
+    );
+
+    expect(result.get("b1")).toEqual(stationary);
+    expect(result.get(sidebarMarkerId("project-gap", "a"))).toEqual(stationary);
+    expect(result.get("a1")?.y).toBe(83);
+    expect(result.get(sidebarMarkerId("settled-header"))).toEqual(stationary);
+  });
+
+  it("keeps the pending gap hidden when the incoming project is the first Active cluster", () => {
+    const items = [
+      pinnedHeader,
+      thread("p", "pinned", "repo:a"),
+      divider,
+      marker("active-placeholder"),
+      projectGap("repo:a"),
+      settledHeader,
+    ];
+    const over = sidebarMarkerId("project-gap", "repo:a");
+    const result = preview({ items, settledOrder: [], settledExpanded: false }, "p", over);
+
+    expect(resolveSidebarDropTarget(items, "p", over)?.activeOrder).toEqual(["p"]);
+    expect(result.get(over)?.scaleY).toBe(0);
+    expect(result.get(sidebarMarkerId("active-placeholder"))?.scaleY).toBe(0);
   });
 
   const pinned = [

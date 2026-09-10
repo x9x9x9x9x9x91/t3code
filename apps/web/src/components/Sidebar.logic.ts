@@ -129,10 +129,10 @@ export type SidebarListMarker =
   | "pinned-divider"
   | "snoozed-header"
   | "settled-header"
-  | "project-header";
+  | "project-gap";
 
 export function sidebarMarkerId(marker: SidebarListMarker, group?: string): string {
-  return `${SIDEBAR_MARKER_PREFIX}${marker}${marker === "project-header" ? `-${encodeURIComponent(group ?? "")}` : ""}`;
+  return `${SIDEBAR_MARKER_PREFIX}${marker}${marker === "project-gap" ? `-${encodeURIComponent(group ?? "")}` : ""}`;
 }
 
 export type SidebarListItem =
@@ -148,9 +148,10 @@ export function sidebarListItemId(item: SidebarListItem): string {
   return item.kind === "thread" ? item.key : sidebarMarkerId(item.marker, item.group);
 }
 
-/** Keep each project's rows together in first-appearance order. */
+/** Keep each project's rows together, with unordered groups in first-appearance order. */
 export function groupSidebarActiveThreads(
   items: readonly Extract<SidebarListItem, { kind: "thread" }>[],
+  preferredGroupOrder: readonly string[] = [],
 ): SidebarListItem[] {
   const groups = new Map<string | undefined, (typeof items)[number][]>();
   for (const item of items) {
@@ -158,9 +159,15 @@ export function groupSidebarActiveThreads(
     if (group) group.push(item);
     else groups.set(item.group, [item]);
   }
-  return [...groups].flatMap(([group, rows]): SidebarListItem[] =>
-    group === undefined ? rows : [{ kind: "marker", marker: "project-header", group }, ...rows],
+  const groupOrder = [...new Set([...preferredGroupOrder, ...groups.keys()])].filter((group) =>
+    groups.has(group),
   );
+  return groupOrder.flatMap((group, index): SidebarListItem[] => {
+    const rows = groups.get(group)!;
+    return index === 0 || group === undefined
+      ? rows
+      : [{ kind: "marker", marker: "project-gap", group }, ...rows];
+  });
 }
 
 /** The section a slot belongs to, read off the markers around it: from
@@ -191,6 +198,7 @@ export function resolveSidebarDropTarget(
   items: readonly SidebarListItem[],
   activeKey: string,
   overId: string,
+  preferredGroupOrder: readonly string[] = [],
 ): SidebarDropTarget | null {
   const activeIndex = items.findIndex((item) => sidebarListItemId(item) === activeKey);
   const overIndex = items.findIndex((item) => sidebarListItemId(item) === overId);
@@ -209,7 +217,7 @@ export function resolveSidebarDropTarget(
     } else if (currentSection === "pinned") pinnedOrder.push(item.key);
     else activeRows.push(item);
   }
-  const activeOrder = groupSidebarActiveThreads(activeRows).flatMap((item) =>
+  const activeOrder = groupSidebarActiveThreads(activeRows, preferredGroupOrder).flatMap((item) =>
     item.kind === "thread" ? [item.key] : [],
   );
   return { section, pinnedOrder, activeOrder };
