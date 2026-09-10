@@ -4749,11 +4749,9 @@ export default function Sidebar() {
                               ) ?? null
                             }
                             projectDisplayName={
-                              section === "active" && groupActiveThreadsByProject
-                                ? null
-                                : (projectDisplayNameByKey.get(
-                                    `${thread.environmentId}:${thread.projectId}`,
-                                  ) ?? null)
+                              projectDisplayNameByKey.get(
+                                `${thread.environmentId}:${thread.projectId}`,
+                              ) ?? null
                             }
                             providerEntryByInstanceId={
                               providerEntriesByEnvironment.get(thread.environmentId) ??
