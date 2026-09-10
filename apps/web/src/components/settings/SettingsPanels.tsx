@@ -3149,7 +3149,7 @@ export function GeneralSettingsPanel() {
         <SettingsRow
           serverScoped
           {...searchableSetting("progress-estimate-model")}
-          description="Every 10 minutes, estimate how close each active thread is to its overall goal and show it in the sidebar. Off uses no model."
+          description="Every 5 minutes, estimate how close each active thread is to its overall goal and show it in the sidebar. Off uses no model."
           control={
             <div className="flex flex-wrap items-center justify-end gap-2">
               {usesProgressEstimateModel && !canEnableProgressEstimateModel ? (

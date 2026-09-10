@@ -95,7 +95,10 @@ export const make = Effect.gen(function* () {
                 }),
           ),
         ),
-      { concurrency: 2, discard: true },
+      // Fork: one estimate at a time so a sweep never fans out into a burst
+      // of parallel model calls; the 5-minute spacing starts after the sweep
+      // ends, so a long sweep simply pushes the next one back.
+      { concurrency: 1, discard: true },
     );
   });
 
@@ -120,7 +123,7 @@ export const make = Effect.gen(function* () {
         Effect.gen(function* () {
           yield* worker.enqueue(undefined);
           yield* worker.drain;
-        }).pipe(Effect.repeat(Schedule.spaced("10 minutes")), Effect.asVoid),
+        }).pipe(Effect.repeat(Schedule.spaced("5 minutes")), Effect.asVoid),
       );
       yield* forkParked(
         Stream.runForEach(settingsChanges, (settings) => {
