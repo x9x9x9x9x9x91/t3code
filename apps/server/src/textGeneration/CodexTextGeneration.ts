@@ -25,6 +25,7 @@ import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
+  buildProgressEstimatePrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
 import {
@@ -101,7 +102,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle",
+      | "generateThreadTitle"
+      | "generateProgressEstimate",
     value: unknown,
   ): Effect.Effect<string, TextGenerationError> =>
     encodeJsonString(value).pipe(
@@ -120,7 +122,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle",
+      | "generateThreadTitle"
+      | "generateProgressEstimate",
     attachments: TextGeneration.BranchNameGenerationInput["attachments"],
   ): Effect.fn.Return<MaterializedImageAttachments, TextGenerationError> {
     if (!attachments || attachments.length === 0) {
@@ -162,7 +165,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "generateProgressEstimate";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -405,10 +409,30 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       } satisfies TextGeneration.ThreadTitleGenerationResult;
     });
 
+  const generateProgressEstimate: TextGeneration.TextGeneration["Service"]["generateProgressEstimate"] =
+    Effect.fn("CodexTextGeneration.generateProgressEstimate")(function* (input) {
+      const { prompt, outputSchema } = buildProgressEstimatePrompt({ context: input.context });
+      const generated = yield* runCodexJson({
+        operation: "generateProgressEstimate",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+
+      return {
+        percent: Number.isFinite(generated.percent)
+          ? Math.max(0, Math.min(100, Math.round(generated.percent)))
+          : 0,
+        summary: generated.summary.trim() || "No summary.",
+      };
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateProgressEstimate,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

@@ -52,6 +52,7 @@ const decodeOrchestrationProposedPlan = Schema.decodeUnknownEffect(Orchestration
 const decodeOrchestrationSession = Schema.decodeUnknownEffect(OrchestrationSession);
 const decodeOrchestrationThread = Schema.decodeUnknownEffect(OrchestrationThread);
 const decodeOrchestrationThreadShell = Schema.decodeUnknownEffect(OrchestrationThreadShell);
+const encodeOrchestrationThreadShell = Schema.encodeEffect(OrchestrationThreadShell);
 const encodeThreadCreatedPayload = Schema.encodeEffect(ThreadCreatedPayload);
 
 function getOptionValue(
@@ -565,6 +566,25 @@ it.effect("defaults settled fields when decoding historical thread data", () =>
       hasPendingUserInput: false,
       hasActionableProposedPlan: false,
     });
+
+    assert.strictEqual(shell.progressEstimate, undefined);
+    const progressEstimate = {
+      percent: 50,
+      summary: "Verification remains.",
+      estimatedAt: "2026-01-02T00:00:00.000Z",
+      basedOnUpdatedAt: shell.updatedAt,
+    };
+    const estimatedShell = yield* decodeOrchestrationThreadShell({ ...shell, progressEstimate });
+    assert.deepEqual(estimatedShell.progressEstimate, progressEstimate);
+    assert.deepEqual(
+      (yield* encodeOrchestrationThreadShell(estimatedShell)).progressEstimate,
+      progressEstimate,
+    );
+    const invalidEstimate = yield* decodeOrchestrationThreadShell({
+      ...shell,
+      progressEstimate: { ...progressEstimate, percent: 101 },
+    }).pipe(Effect.result);
+    assert.strictEqual(invalidEstimate._tag, "Failure");
 
     assert.strictEqual(thread.settledOverride, null);
     assert.strictEqual(thread.settledAt, null);

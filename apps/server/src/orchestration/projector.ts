@@ -345,6 +345,7 @@ export function projectEvent(
             settledAt: null,
             unsettledAt: null,
             activeOrderKey: null,
+            progressEstimate: null,
             snoozedUntil: null,
             snoozedAt: null,
             deletedAt: null,
@@ -504,6 +505,9 @@ export function projectEvent(
             ...(payload.title !== undefined ? { title: payload.title } : {}),
             ...(payload.activeOrderKey !== undefined
               ? { activeOrderKey: payload.activeOrderKey }
+              : {}),
+            ...(payload.progressEstimate !== undefined
+              ? { progressEstimate: payload.progressEstimate }
               : {}),
             ...(payload.titleRegeneration !== undefined
               ? { titleRegeneration: payload.titleRegeneration }

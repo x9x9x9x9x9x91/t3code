@@ -304,6 +304,7 @@ function createTextGeneration(
       Effect.succeed({
         title: "Update workflow",
       }),
+    generateProgressEstimate: () => Effect.succeed({ percent: 50, summary: "Tests remain." }),
     ...overrides,
   };
 
@@ -347,6 +348,17 @@ function createTextGeneration(
           (cause) =>
             new TextGenerationError({
               operation: "generateThreadTitle",
+              detail: "fake text generation failed",
+              ...(cause !== undefined ? { cause } : {}),
+            }),
+        ),
+      ),
+    generateProgressEstimate: (input) =>
+      implementation.generateProgressEstimate(input).pipe(
+        Effect.mapError(
+          (cause) =>
+            new TextGenerationError({
+              operation: "generateProgressEstimate",
               detail: "fake text generation failed",
               ...(cause !== undefined ? { cause } : {}),
             }),

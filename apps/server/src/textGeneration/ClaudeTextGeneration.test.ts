@@ -256,6 +256,53 @@ function withFakeClaudeEnv<A, E, R>(
 }
 
 it.layer(ClaudeTextGenerationTestLayer)("ClaudeTextGeneration", (it) => {
+  it.effect("replaces an empty progress summary", () =>
+    withFakeClaudeEnv(
+      { output: '{"structured_output":{"percent":50,"summary":"  "}}' },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const generated = yield* textGeneration.generateProgressEstimate({
+            cwd: process.cwd(),
+            context: "USER:\nFinish the feature",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("claudeAgent"),
+              model: SYNTHETIC_CLAUDE_STANDARD_MODEL,
+            },
+          });
+          expect(generated).toEqual({ percent: 50, summary: "No summary." });
+        }),
+    ),
+  );
+
+  for (const [percent, expected] of [
+    ["52.6", 53],
+    ["150", 100],
+    ["-5", 0],
+    ["1e999", 0],
+  ] as const) {
+    it.effect(`normalizes progress estimate ${percent} to ${expected}`, () =>
+      withFakeClaudeEnv(
+        {
+          output: `{"structured_output":{"percent":${percent},"summary":"  Tests remain.  "}}`,
+          stdinMustContain: "USER:\nFinish the feature",
+          cwdMustNotBe: process.cwd(),
+        },
+        (textGeneration) =>
+          Effect.gen(function* () {
+            const generated = yield* textGeneration.generateProgressEstimate({
+              cwd: process.cwd(),
+              context: "USER:\nFinish the feature",
+              modelSelection: {
+                instanceId: ProviderInstanceId.make("claudeAgent"),
+                model: SYNTHETIC_CLAUDE_STANDARD_MODEL,
+              },
+            });
+            expect(generated).toEqual({ percent: expected, summary: "Tests remain." });
+          }),
+      ),
+    );
+  }
+
   it.effect("forwards Claude thinking settings without passing unsupported effort", () =>
     withFakeClaudeEnv(
       {

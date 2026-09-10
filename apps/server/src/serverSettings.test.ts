@@ -517,6 +517,32 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
+  it.effect("persists the progress model as an atomic opt-in and restores off", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      assert.isNull((yield* serverSettings.getSettings).progressEstimateModelSelection);
+      const progressEstimateModelSelection = {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: DEFAULT_SERVER_SETTINGS.textGenerationModelSelection.model,
+      };
+      yield* serverSettings.updateSettings({ progressEstimateModelSelection });
+      assert.deepEqual(
+        (yield* serverSettings.getSettings).progressEstimateModelSelection,
+        progressEstimateModelSelection,
+      );
+      const raw = yield* fileSystem.readFileString(serverConfig.settingsPath);
+      assert.deepEqual(
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        JSON.parse(raw).progressEstimateModelSelection,
+        progressEstimateModelSelection,
+      );
+      const next = yield* serverSettings.updateSettings({ progressEstimateModelSelection: null });
+      assert.isNull(next.progressEstimateModelSelection);
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect("drops stale text generation options when resetting model selection", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsModule.ServerSettingsService;

@@ -266,5 +266,12 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateProgressEstimate: () =>
+      Effect.fail(
+        new TextGenerationError({
+          operation: "generateProgressEstimate",
+          detail: "Grok does not support progress estimates.",
+        }),
+      ),
   } satisfies TextGeneration.TextGeneration["Service"];
 });

@@ -1890,6 +1890,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               ) : (
                 <span className="flex-1" />
               )}
+              {thread.settledOverride !== "settled" &&
+              thread.settledAt === null &&
+              thread.progressEstimate ? (
+                // oxlint-disable-next-line t3code/no-native-title-tooltip -- Progress estimates intentionally use a native summary tooltip.
+                <span className="shrink-0 tabular-nums" title={thread.progressEstimate.summary}>
+                  {thread.progressEstimate.percent}%
+                </span>
+              ) : null}
               {terminalStatusIcon}
               {prBadge}
               {diff ? (

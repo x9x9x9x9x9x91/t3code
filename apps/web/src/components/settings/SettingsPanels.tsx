@@ -495,6 +495,10 @@ export function useSettingsRestore(onRestored?: () => void) {
     settings.textGenerationModelSelection ?? null,
     DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
   );
+  const isProgressEstimateModelDirty = !Equal.equals(
+    settings.progressEstimateModelSelection,
+    DEFAULT_UNIFIED_SETTINGS.progressEstimateModelSelection,
+  );
   const isBackgroundActivityDirty = hasChangedBackgroundActivitySettings(settings);
 
   const changedSettingLabels = useMemo(
@@ -586,6 +590,7 @@ export function useSettingsRestore(onRestored?: () => void) {
         : []),
       ...(settings.confirmQuit !== DEFAULT_UNIFIED_SETTINGS.confirmQuit ? ["Quit shortcut"] : []),
       ...(isTextGenerationModelDirty ? ["Text generation model"] : []),
+      ...(isProgressEstimateModelDirty ? ["Progress estimate model"] : []),
       ...getChangedBrowserSettingLabels(settings),
       ...(settings.enableAgentBrowserAccess !== DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess
         ? ["Agent browser access"]
@@ -593,6 +598,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     ],
     [
       isTextGenerationModelDirty,
+      isProgressEstimateModelDirty,
       isBackgroundActivityDirty,
       settings.browserDefaultViewport,
       settings.browserDefaultZoomFactor,
@@ -738,6 +744,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       confirmThreadUnpin: DEFAULT_UNIFIED_SETTINGS.confirmThreadUnpin,
       confirmQuit: DEFAULT_UNIFIED_SETTINGS.confirmQuit,
       textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
+      progressEstimateModelSelection: DEFAULT_UNIFIED_SETTINGS.progressEstimateModelSelection,
       fontFamilySans: DEFAULT_UNIFIED_SETTINGS.fontFamilySans,
       fontFamilyComposer: DEFAULT_UNIFIED_SETTINGS.fontFamilyComposer,
       fontFamilyCode: DEFAULT_UNIFIED_SETTINGS.fontFamilyCode,
@@ -2061,6 +2068,18 @@ export function GeneralSettingsPanel() {
     textGenInstanceId,
     textGenModel,
   );
+  const usesProgressEstimateModel = settings.progressEstimateModelSelection !== null;
+  const progressEstimateSelection =
+    settings.progressEstimateModelSelection ?? textGenerationModelSelection;
+  const canEnableProgressEstimateModel = textGenerationModelInstanceEntries.some(
+    (entry) => entry.instanceId === textGenInstanceId && entry.enabled && entry.isAvailable,
+  );
+  const progressEstimateModelOptionsByInstance = getCustomModelOptionsByInstance(
+    settings,
+    textGenerationProviders,
+    progressEstimateSelection.instanceId,
+    progressEstimateSelection.model,
+  );
   const isTextGenerationModelDirty = !Equal.equals(
     settings.textGenerationModelSelection ?? null,
     DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
@@ -2841,6 +2860,59 @@ export function GeneralSettingsPanel() {
                 ) : null}
               </div>
             )
+          }
+        />
+        <SettingsRow
+          serverScoped
+          {...searchableSetting("progress-estimate-model")}
+          description="Every 10 minutes, estimate how close each active thread is to its overall goal and show it in the sidebar. Off uses no model."
+          control={
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {usesProgressEstimateModel && !canEnableProgressEstimateModel ? (
+                <span className="text-sm text-muted-foreground">
+                  No text generation providers available.
+                </span>
+              ) : null}
+              {usesProgressEstimateModel && canEnableProgressEstimateModel ? (
+                <ProviderModelPicker
+                  activeInstanceId={progressEstimateSelection.instanceId}
+                  model={progressEstimateSelection.model}
+                  lockedProvider={null}
+                  instanceEntries={textGenerationModelInstanceEntries}
+                  modelOptionsByInstance={progressEstimateModelOptionsByInstance}
+                  triggerVariant="outline"
+                  triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
+                  triggerAriaLabel="Progress estimate model"
+                  {...(environmentId
+                    ? {
+                        onOpenProviderSetup: (instanceId: ProviderInstanceId) => {
+                          void navigate({
+                            to: "/settings/providers",
+                            search: { environmentId, instanceId },
+                          });
+                        },
+                      }
+                    : {})}
+                  onInstanceModelChange={(instanceId, model) => {
+                    updateSettings({
+                      progressEstimateModelSelection: createModelSelection(instanceId, model),
+                    });
+                  }}
+                />
+              ) : null}
+              <Switch
+                checked={usesProgressEstimateModel}
+                disabled={!usesProgressEstimateModel && !canEnableProgressEstimateModel}
+                onCheckedChange={(checked) =>
+                  updateSettings({
+                    progressEstimateModelSelection: checked
+                      ? createModelSelection(textGenInstanceId, textGenModel, textGenModelOptions)
+                      : null,
+                  })
+                }
+                aria-label="Enable progress estimates"
+              />
+            </div>
           }
         />
       </SettingsSection>

@@ -1,9 +1,11 @@
+import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
+  buildProgressEstimatePrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
 import { normalizeCliError, sanitizeThreadTitle } from "./TextGenerationUtils.ts";
@@ -309,5 +311,18 @@ describe("normalizeCliError", () => {
 
     expect(result.detail).toBe("Failed to generate a commit message");
     expect(result.message).not.toContain("secret-token");
+  });
+});
+
+describe("buildProgressEstimatePrompt", () => {
+  it("includes the thread context and decodes a progress estimate", () => {
+    const context = "USER:\nFinish the feature\n\nASSISTANT:\nTests remain";
+    const { prompt, outputSchema } = buildProgressEstimatePrompt({ context });
+
+    expect(prompt).toContain(context);
+    expect(Schema.decodeUnknownSync(outputSchema)({ percent: 50, summary: "x" })).toEqual({
+      percent: 50,
+      summary: "x",
+    });
   });
 });

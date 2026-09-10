@@ -264,5 +264,12 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateProgressEstimate: () =>
+      Effect.fail(
+        new TextGenerationError({
+          operation: "generateProgressEstimate",
+          detail: "Cursor does not support progress estimates.",
+        }),
+      ),
   } satisfies TextGeneration.TextGeneration["Service"];
 });

@@ -9,6 +9,7 @@ import {
   ProjectId,
   ThreadId,
   ThreadLinkedPullRequest,
+  ThreadProgressEstimate,
   TurnId,
   ProviderInstanceId,
 } from "@t3tools/contracts";
@@ -61,6 +62,9 @@ const exists = (filePath: string) =>
   });
 
 const BaseTestLayer = makeProjectionPipelinePrefixedTestLayer("t3-projection-pipeline-test-");
+const encodeThreadProgressEstimate = Schema.encodeEffect(
+  Schema.fromJsonString(ThreadProgressEstimate),
+);
 const encodeThreadLinkedPullRequest = Schema.encodeSync(
   Schema.fromJsonString(ThreadLinkedPullRequest),
 );
@@ -528,6 +532,41 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
           FROM projection_threads WHERE thread_id = 'thread-1'
         `;
         assert.deepEqual(rows, [{ activeOrderKey: "gm", updatedAt: orderUpdatedAt }]);
+      }
+
+      const progressEstimate = {
+        percent: 50,
+        summary: "Verification remains.",
+        estimatedAt: "2026-01-01T00:00:00.500Z",
+        basedOnUpdatedAt: orderUpdatedAt,
+      };
+      for (const [index, payload] of [
+        { progressEstimate },
+        { title: "Still estimated" },
+      ].entries()) {
+        yield* eventStore.append({
+          type: "thread.meta-updated",
+          eventId: EventId.make(`evt-progress-${index}`),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-1"),
+          occurredAt: "2026-01-01T00:00:00.500Z",
+          commandId: CommandId.make(`cmd-progress-${index}`),
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+          payload: { ...payload, threadId: ThreadId.make("thread-1"), updatedAt: orderUpdatedAt },
+        });
+        yield* projectionPipeline.bootstrap;
+        const rows = yield* sql<{ readonly progressEstimate: string; readonly updatedAt: string }>`
+          SELECT progress_estimate AS "progressEstimate", updated_at AS "updatedAt"
+          FROM projection_threads WHERE thread_id = 'thread-1'
+        `;
+        assert.deepEqual(rows, [
+          {
+            progressEstimate: yield* encodeThreadProgressEstimate(progressEstimate),
+            updatedAt: orderUpdatedAt,
+          },
+        ]);
       }
 
       // Settled lifecycle through the DB pipeline: thread.settled writes the
@@ -4001,6 +4040,94 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
         },
       ]);
     }),
+  );
+
+  it.effect(
+    "round-trips estimates through commands and snapshots and tolerates malformed storage",
+    () =>
+      Effect.gen(function* () {
+        const engine = yield* OrchestrationEngineService;
+        const snapshots = yield* ProjectionSnapshotQuery;
+        const sql = yield* SqlClient.SqlClient;
+        const createdAt = "2026-01-01T00:00:00.000Z";
+        const projectId = ProjectId.make("project-progress");
+        const threadId = ThreadId.make("thread-progress");
+        yield* engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.make("cmd-progress-project"),
+          projectId,
+          title: "Progress project",
+          workspaceRoot: "/tmp/project-progress",
+          createdAt,
+        });
+        yield* engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.make("cmd-progress-thread"),
+          threadId,
+          projectId,
+          title: "Progress thread",
+          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt,
+        });
+        const estimate = {
+          percent: 50,
+          summary: "Verification remains.",
+          estimatedAt: "2026-01-02T00:00:00.000Z",
+          basedOnUpdatedAt: createdAt,
+        };
+        yield* engine.dispatch({
+          type: "thread.progress-estimate.set",
+          commandId: CommandId.make("cmd-progress-estimate"),
+          threadId,
+          estimate,
+        });
+        const shell = Option.getOrThrow(yield* snapshots.getThreadShellById(threadId));
+        assert.deepEqual(shell.progressEstimate, estimate);
+        assert.strictEqual(shell.updatedAt, createdAt);
+        assert.deepEqual(
+          (yield* snapshots.getShellSnapshot()).threads.find((thread) => thread.id === threadId)
+            ?.progressEstimate,
+          estimate,
+        );
+        assert.deepEqual(
+          (yield* snapshots.getSnapshot()).threads.find((thread) => thread.id === threadId)
+            ?.progressEstimate,
+          estimate,
+        );
+        assert.deepEqual(
+          Option.getOrThrow(yield* snapshots.getThreadDetailById(threadId)).progressEstimate,
+          estimate,
+        );
+        for (const malformed of ["not json", '{"percent":101}', '{"percent":50,"summary":""}']) {
+          yield* sql`UPDATE projection_threads SET progress_estimate = ${malformed} WHERE thread_id = ${threadId}`;
+          assert.isNull(
+            Option.getOrThrow(yield* snapshots.getThreadShellById(threadId)).progressEstimate,
+          );
+          assert.isNull(
+            Option.getOrThrow(yield* snapshots.getThreadDetailById(threadId)).progressEstimate,
+          );
+          // A later metadata write also reads the row through the persistence repository.
+          yield* engine.dispatch({
+            type: "thread.meta.update",
+            commandId: CommandId.make(`cmd-progress-malformed-${malformed}`),
+            threadId,
+            title: "Recovered progress thread",
+          });
+        }
+        yield* engine.dispatch({
+          type: "thread.progress-estimate.set",
+          commandId: CommandId.make("cmd-progress-clear"),
+          threadId,
+          estimate: null,
+        });
+        assert.isNull(
+          Option.getOrThrow(yield* snapshots.getThreadShellById(threadId)).progressEstimate,
+        );
+      }),
   );
 
   it.effect("re-creating a deleted thread id starts from an empty projection", () =>

@@ -148,6 +148,45 @@ function withFakeCodexEnv<A, E, R>(
 }
 
 it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
+  it.effect("replaces an empty progress summary", () =>
+    withFakeCodexEnv({ output: '{"percent":50,"summary":"  "}' }, (textGeneration) =>
+      Effect.gen(function* () {
+        const generated = yield* textGeneration.generateProgressEstimate({
+          cwd: process.cwd(),
+          context: "USER:\nFinish the feature",
+          modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+        });
+        expect(generated).toEqual({ percent: 50, summary: "No summary." });
+      }),
+    ),
+  );
+
+  for (const [percent, expected] of [
+    ["52.6", 53],
+    ["150", 100],
+    ["-5", 0],
+    ["1e999", 0],
+  ] as const) {
+    it.effect(`normalizes progress estimate ${percent} to ${expected}`, () =>
+      withFakeCodexEnv(
+        {
+          output: `{"percent":${percent},"summary":"  Tests remain.  "}`,
+          stdinMustContain: "USER:\nFinish the feature",
+          forbidArg: "--image",
+        },
+        (textGeneration) =>
+          Effect.gen(function* () {
+            const generated = yield* textGeneration.generateProgressEstimate({
+              cwd: process.cwd(),
+              context: "USER:\nFinish the feature",
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            });
+            expect(generated).toEqual({ percent: expected, summary: "Tests remain." });
+          }),
+      ),
+    );
+  }
+
   it.effect("generates and sanitizes commit messages without branch by default", () =>
     withFakeCodexEnv(
       {
@@ -233,7 +272,10 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
           body: "",
         }),
         launchArgs: "--enable settings-feature",
-        environment: { T3CODE_CODEX_LAUNCH_ARGS: " --strict-config --listen off " },
+        environment: {
+          PATH: process.env.PATH,
+          T3CODE_CODEX_LAUNCH_ARGS: " --strict-config --listen off ",
+        },
         requireArg: "--strict-config",
         forbidArg: "settings-feature",
       },

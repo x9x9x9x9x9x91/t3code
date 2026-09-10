@@ -468,6 +468,14 @@ export const OrchestrationLatestTurn = Schema.Struct({
 });
 export type OrchestrationLatestTurn = typeof OrchestrationLatestTurn.Type;
 
+export const ThreadProgressEstimate = Schema.Struct({
+  percent: NonNegativeInt.check(Schema.isLessThanOrEqualTo(100)),
+  summary: TrimmedNonEmptyString,
+  estimatedAt: IsoDateTime,
+  basedOnUpdatedAt: IsoDateTime,
+});
+export type ThreadProgressEstimate = typeof ThreadProgressEstimate.Type;
+
 export const ThreadTitleRegeneration = Schema.Struct({
   requestId: CommandId,
   startedAt: IsoDateTime,
@@ -526,6 +534,7 @@ export const OrchestrationThread = Schema.Struct({
   // Manual Active placement. Keyless threads retain their creation/re-entry
   // order above the arranged run. Settling clears this slot.
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  progressEstimate: Schema.optional(Schema.NullOr(ThreadProgressEstimate)),
   // Pending-only state. Optional so older servers remain compatible.
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
   deletedAt: Schema.NullOr(IsoDateTime),
@@ -592,6 +601,7 @@ export const OrchestrationThreadShell = Schema.Struct({
   pinnedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  progressEstimate: Schema.optional(Schema.NullOr(ThreadProgressEstimate)),
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
   session: Schema.NullOr(OrchestrationSession),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),
@@ -897,6 +907,13 @@ const ThreadPinReorderCommand = Schema.Struct({
   // on other servers) are never touched. Clients compute a key that sorts
   // between the dropped position's neighbors.
   orderKey: TrimmedNonEmptyString,
+});
+
+const ThreadProgressEstimateSetCommand = Schema.Struct({
+  type: Schema.Literal("thread.progress-estimate.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  estimate: Schema.NullOr(ThreadProgressEstimate),
 });
 
 const ThreadActiveReorderCommand = Schema.Struct({
@@ -1229,6 +1246,7 @@ const ThreadPullRequestSyncCommand = Schema.Struct({
 });
 
 const InternalOrchestrationCommand = Schema.Union([
+  ThreadProgressEstimateSetCommand,
   ThreadAutoSettleCommand,
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
@@ -1404,6 +1422,8 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   // Order updates use this existing event so older clients can ignore the
   // new field while continuing to decode the event stream.
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  /** Periodic overall-goal estimate; does not change thread activity. */
+  progressEstimate: Schema.optional(Schema.NullOr(ThreadProgressEstimate)),
   title: Schema.optional(TrimmedNonEmptyString),
   /** Intent marker consumed by the title-generation reactor. Keeping this on
       the existing event lets older clients safely ignore the new field. */

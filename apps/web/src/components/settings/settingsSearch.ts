@@ -296,6 +296,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["generated thread titles source control content default provider"],
   },
   {
+    id: "progress-estimate-model",
+    title: "Progress estimate model",
+    to: "/settings/general",
+    searchTerms: ["sidebar percent done overall goal estimate"],
+    primaryOnly: true,
+  },
+  {
     id: "diagnostics",
     title: "Diagnostics",
     to: "/settings/general",

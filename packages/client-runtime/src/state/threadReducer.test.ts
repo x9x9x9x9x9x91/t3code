@@ -289,6 +289,39 @@ describe("applyThreadDetailEvent", () => {
   });
 
   describe("thread.meta-updated", () => {
+    it("stores, preserves and clears an estimate without changing activity", () => {
+      const estimate = {
+        percent: 50,
+        summary: "Verification remains.",
+        estimatedAt: "2026-04-01T05:00:00.000Z",
+        basedOnUpdatedAt: baseThread.updatedAt,
+      };
+      let thread = baseThread;
+      for (const progressEstimate of [estimate, undefined, null]) {
+        const result = applyThreadDetailEvent(thread, {
+          ...baseEventFields,
+          sequence: 5,
+          occurredAt: "2026-04-01T05:00:00.000Z",
+          aggregateKind: "thread",
+          aggregateId: thread.id,
+          type: "thread.meta-updated",
+          payload: {
+            threadId: thread.id,
+            ...(progressEstimate !== undefined ? { progressEstimate } : {}),
+            updatedAt: baseThread.updatedAt,
+          },
+        });
+        expect(result.kind).toBe("updated");
+        if (result.kind === "updated") {
+          thread = result.thread;
+          expect(thread.progressEstimate).toEqual(
+            progressEstimate === undefined ? estimate : progressEstimate,
+          );
+          expect(thread.updatedAt).toBe(baseThread.updatedAt);
+        }
+      }
+    });
+
     it.each(["f", null] as const)(
       "updates the active key to %s without activity",
       (activeOrderKey) => {

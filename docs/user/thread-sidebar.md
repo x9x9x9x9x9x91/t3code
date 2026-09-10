@@ -31,6 +31,14 @@ across sections.
 
 Pinning does not prevent automatic settlement. Settling a thread removes its pin.
 
+## Progress estimates
+
+Turn on **Settings → General → Text generation → Progress estimate model** to have a model
+estimate, every 10 minutes, how far each active thread is toward its overall goal. The
+percentage appears on the thread row; hover it for one sentence on what remains. The
+estimate counts every request made in the thread, including follow-ups, so a thread that
+finished its first task and then received a new request is not 100%. Off by default.
+
 On web and desktop, drag a thread between sections to change its state. Drag a thread up into
 the pinned section to pin it at the spot you drop it; drag a pinned thread down into the active
 list to unpin it. Dragging a thread onto the **Settled** header settles it, and dragging a settled
