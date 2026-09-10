@@ -24,6 +24,11 @@ worktree**, each background submission creates its own worktree.
 
 Pin a thread from its menu to keep it above your active work.
 
+On web and desktop, turn on **Settings → General → Group active threads by project**
+to cluster the active list under a header per project. Repositories merged by
+**Project grouping** share a header. Dragging still reorders inside a cluster and
+across sections.
+
 Pinning does not prevent automatic settlement. Settling a thread removes its pin.
 
 On web and desktop, drag a thread between sections to change its state. Drag a thread up into
