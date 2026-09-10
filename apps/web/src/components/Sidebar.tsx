@@ -31,6 +31,7 @@ import {
 } from "@t3tools/client-runtime/environment";
 import {
   resolveEnvironmentMachineKind,
+  type ContextMenuItem,
   type EnvironmentMachineKind,
   type ProjectIconOverride,
   type ScopedThreadRef,
@@ -146,7 +147,7 @@ import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { ProjectEnvironmentBadge } from "./ProjectEnvironmentBadge";
-import { buildThreadActionMenuItems } from "./threadActionMenu.logic";
+import { buildThreadActionMenuItems, type ThreadActionMenuId } from "./threadActionMenu.logic";
 import {
   animateSidebarLayoutChanges,
   applySidebarThreadDrop,
@@ -190,6 +191,7 @@ import { resolveLocalCheckoutBranchMismatch } from "./BranchToolbar.logic";
 import {
   createSidebarCollisionDetection,
   createSidebarSortingStrategy,
+  PROJECT_GAP_HEIGHT,
   restrictBelowSidebarLabel,
 } from "./Sidebar.drag";
 import { SidebarDragLifecycle, SidebarPointerSensor } from "./Sidebar.pointer";
@@ -553,6 +555,7 @@ function SortableSidebarMarker(props: {
   marker: SidebarListMarker;
   group?: string | undefined;
   className?: string;
+  height?: number;
   children?: ReactNode;
   "data-testid"?: string;
 }) {
@@ -568,6 +571,7 @@ function SortableSidebarMarker(props: {
       data-testid={props["data-testid"]}
       className={cn("list-none", props.className)}
       style={{
+        height: props.height,
         transform: CSS.Translate.toString(transform),
         // A newly revealed target must not slide from its hidden position.
         transition: props.marker.endsWith("-placeholder") ? "none" : transition,
@@ -2131,6 +2135,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
 export default function Sidebar() {
   const projects = useProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
+  const sidebarActiveGroupOrder = useUiStateStore((store) => store.sidebarActiveGroupOrder);
   const threads = useThreadShells();
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
@@ -2775,9 +2780,17 @@ export default function Sidebar() {
     [groupActiveThreadsByProject, projectGroupKeyByProjectKey],
   );
   const activeSidebarItems = useMemo(
-    () => groupSidebarActiveThreads(activeThreads.map((thread) => toSidebarRow(thread, "active"))),
-    [activeThreads, toSidebarRow],
+    () =>
+      groupSidebarActiveThreads(
+        activeThreads.map((thread) => toSidebarRow(thread, "active")),
+        sidebarActiveGroupOrder,
+      ),
+    [activeThreads, sidebarActiveGroupOrder, toSidebarRow],
   );
+  const activeSidebarItemsRef = useRef(activeSidebarItems);
+  useLayoutEffect(() => {
+    activeSidebarItemsRef.current = activeSidebarItems;
+  }, [activeSidebarItems]);
   // Visual order of the active rows. Drop planning and the optimistic hold
   // read this, not the key sort: clusters interleave rows whose keys are not
   // neighbours, and the planner keys a move off its visual neighbours.
@@ -3402,9 +3415,9 @@ export default function Sidebar() {
     items.push({ kind: "marker", marker: "pinned-divider" });
     items.push({ kind: "marker", marker: "active-placeholder" });
     items.push(...activeSidebarItems);
-    // A thread entering Active may need a header that has no rows at rest.
+    // A thread entering Active may need a gap that has no rows at rest.
     if (pendingActiveProjectGroup !== null) {
-      items.push({ kind: "marker", marker: "project-header", group: pendingActiveProjectGroup });
+      items.push({ kind: "marker", marker: "project-gap", group: pendingActiveProjectGroup });
     }
     if (snoozedThreads.length > 0) {
       items.push({ kind: "marker", marker: "snoozed-header" });
@@ -3464,7 +3477,12 @@ export default function Sidebar() {
   const handleThreadDragOver = useCallback(
     (event: DragOverEvent) => {
       const target = event.over
-        ? resolveSidebarDropTarget(sidebarListItems, String(event.active.id), String(event.over.id))
+        ? resolveSidebarDropTarget(
+            sidebarListItems,
+            String(event.active.id),
+            String(event.over.id),
+            sidebarActiveGroupOrder,
+          )
         : null;
       setDragState((current) =>
         current === null || current.activeKey !== String(event.active.id)
@@ -3472,7 +3490,7 @@ export default function Sidebar() {
           : { ...current, targetSection: target?.section ?? null },
       );
     },
-    [sidebarListItems],
+    [sidebarActiveGroupOrder, sidebarListItems],
   );
   const sortableIds = useMemo(() => sidebarListItems.map(sidebarListItemId), [sidebarListItems]);
   const draggedSettledOrder = useMemo(() => {
@@ -3489,6 +3507,7 @@ export default function Sidebar() {
     () =>
       createSidebarSortingStrategy({
         items: sidebarListItems,
+        activeGroupOrder: sidebarActiveGroupOrder,
         boundaryLabelHeight: SIDEBAR_DRAG_LABEL_HEIGHT,
         settledOrder: draggedSettledOrder,
         settledExpanded: settledShelfExpanded,
@@ -3501,6 +3520,7 @@ export default function Sidebar() {
       routeThreadKey,
       settledShelfExpanded,
       settledVisibleCount,
+      sidebarActiveGroupOrder,
       sidebarListItems,
       snoozedThreads.length,
     ],
@@ -3534,7 +3554,12 @@ export default function Sidebar() {
     if (source === undefined) return createSidebarCollisionDetection(() => false);
     return createSidebarCollisionDetection(
       (id) => {
-        const target = resolveSidebarDropTarget(sidebarListItems, draggedThreadKey, id);
+        const target = resolveSidebarDropTarget(
+          sidebarListItems,
+          draggedThreadKey,
+          id,
+          sidebarActiveGroupOrder,
+        );
         if (target === null) return false;
         return (
           planSidebarThreadDrop({
@@ -3557,6 +3582,7 @@ export default function Sidebar() {
       },
       {
         items: sidebarListItems,
+        activeGroupOrder: sidebarActiveGroupOrder,
         activationY: dragActivationY ?? null,
       },
     );
@@ -3571,6 +3597,7 @@ export default function Sidebar() {
     dragActivationY,
     draggableThreadKeys,
     pinnedKeys,
+    sidebarActiveGroupOrder,
     sidebarListItems,
     threadByKey,
   ]);
@@ -3581,7 +3608,12 @@ export default function Sidebar() {
       const target =
         event.over === null
           ? null
-          : resolveSidebarDropTarget(sidebarListItems, activeKey, String(event.over.id));
+          : resolveSidebarDropTarget(
+              sidebarListItems,
+              activeKey,
+              String(event.over.id),
+              sidebarActiveGroupOrder,
+            );
       const activeThread = threadByKey.get(activeKey);
       if (activeSection === undefined || target === null || activeThread === undefined) return;
       const threadRef = scopeThreadRef(activeThread.environmentId, activeThread.id);
@@ -3728,6 +3760,7 @@ export default function Sidebar() {
       reorderActiveThread,
       sectionByThreadKey,
       settleThread,
+      sidebarActiveGroupOrder,
       sidebarListItems,
       threadByKey,
       unpinThread,
@@ -4103,28 +4136,54 @@ export default function Sidebar() {
         const isPinned = thread.pinnedAt != null;
         // Presets resolve at menu-open time (same as the popover).
         const snoozePresets = resolveSnoozePresets(new Date(), timestampFormat);
-        const clicked = await settlePromise(() =>
-          api.contextMenu.show(
-            buildThreadActionMenuItems({
-              branch: thread.branch ?? null,
-              isPinned,
-              isSettled,
-              isSnoozed,
-              canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
-              isRegeneratingTitle,
-              isRunning:
-                thread.session?.status === "running" && thread.session.activeTurnId != null,
-              supports: {
-                settlement: supportsSettlement,
-                snooze: supportsSnooze,
-                pinning: supportsPinning,
-                titleRegeneration: supportsTitleRegeneration,
-              },
-              snoozePresets,
-            }),
-            position,
-          ),
+        type SidebarThreadMenuId = ThreadActionMenuId | "move-project-up" | "move-project-down";
+        const menuItems: ContextMenuItem<SidebarThreadMenuId>[] = [
+          ...buildThreadActionMenuItems({
+            branch: thread.branch ?? null,
+            isPinned,
+            isSettled,
+            isSnoozed,
+            canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
+            isRegeneratingTitle,
+            isRunning: thread.session?.status === "running" && thread.session.activeTurnId != null,
+            supports: {
+              settlement: supportsSettlement,
+              snooze: supportsSnooze,
+              pinning: supportsPinning,
+              titleRegeneration: supportsTitleRegeneration,
+            },
+            snoozePresets,
+          }),
+        ];
+        const activeRow = activeSidebarItemsRef.current.find(
+          (item) => item.kind === "thread" && item.key === threadKey,
         );
+        const groupKey = activeRow?.group;
+        const currentGroupOrder = () => [
+          ...new Set(
+            activeSidebarItemsRef.current.flatMap((item) =>
+              item.kind === "thread" && item.group !== undefined ? [item.group] : [],
+            ),
+          ),
+        ];
+        if (groupKey !== undefined) {
+          const groupOrder = currentGroupOrder();
+          const groupIndex = groupOrder.indexOf(groupKey);
+          menuItems.push(
+            {
+              id: "move-project-up",
+              label: "Move project up",
+              separatorBefore: true,
+              disabled: groupIndex === 0,
+            },
+            {
+              id: "move-project-down",
+              label: "Move project down",
+              disabled: groupIndex === groupOrder.length - 1,
+            },
+          );
+        }
+        const clicked = await settlePromise(() => api.contextMenu.show(menuItems, position));
         if (clicked._tag === "Failure") return;
         if (clicked.value?.startsWith("snooze:")) {
           const preset =
@@ -4135,6 +4194,18 @@ export default function Sidebar() {
           return;
         }
         switch (clicked.value) {
+          case "move-project-up":
+          case "move-project-down":
+            if (groupKey !== undefined) {
+              useUiStateStore
+                .getState()
+                .moveSidebarActiveGroup(
+                  currentGroupOrder(),
+                  groupKey,
+                  clicked.value === "move-project-up" ? "up" : "down",
+                );
+            }
+            return;
           case "project-settings": {
             const projectGroup = projectGroupsRef.current.find((group) =>
               group.memberProjectRefs.some(
@@ -4827,38 +4898,22 @@ export default function Sidebar() {
                           continue;
                         }
                         switch (item.marker) {
-                          case "project-header": {
-                            const project = projectGroupByScopeKey.get(item.group ?? "");
+                          case "project-gap":
                             items.push(
                               <SortableSidebarMarker
                                 key={sidebarListItemId(item)}
-                                marker="project-header"
+                                marker="project-gap"
                                 group={item.group}
-                                data-testid="sidebar-project-header"
-                                className={cn(
-                                  "relative mx-0.5",
-                                  item.group === pendingActiveProjectGroup ? "-mb-px h-0" : "h-7",
-                                )}
-                              >
-                                <div className="absolute inset-x-0 top-0 flex h-7 items-center gap-2 px-2 text-xs font-medium text-sidebar-muted-foreground">
-                                  {project ? (
-                                    <ProjectFavicon
-                                      environmentId={project.environmentId}
-                                      cwd={project.workspaceRoot}
-                                      projectName={project.title}
-                                      faviconPath={project.faviconPath}
-                                      projectIcon={project.projectIcon}
-                                      className="size-3 shrink-0"
-                                    />
-                                  ) : null}
-                                  <span className="truncate">
-                                    {project?.displayName ?? "Unknown project"}
-                                  </span>
-                                </div>
-                              </SortableSidebarMarker>,
+                                data-testid="sidebar-project-gap"
+                                height={
+                                  item.group === pendingActiveProjectGroup ? 0 : PROJECT_GAP_HEIGHT
+                                }
+                                className={
+                                  item.group === pendingActiveProjectGroup ? "-mb-px h-0" : "h-2.5"
+                                }
+                              />,
                             );
                             break;
-                          }
                           case "pinned-header":
                             items.push(
                               <SidebarDragBoundary

@@ -2216,7 +2216,7 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("group-active-threads-by-project")}
-          description="Cluster the active list under one header per project."
+          description="Cluster the active list by project, with a gap between projects. Reorder projects from a thread's right-click menu."
           resetAction={
             settings.sidebarGroupActiveThreadsByProject !==
             DEFAULT_UNIFIED_SETTINGS.sidebarGroupActiveThreadsByProject ? (
