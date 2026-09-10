@@ -248,7 +248,7 @@ describe("ThreadProgressReactor", () => {
         yield* Effect.gen(function* () {
           const reactor = yield* ThreadProgressReactor.ThreadProgressReactor;
           yield* startHarness(reactor, fixture);
-          yield* TestClock.adjust("10 minutes");
+          yield* TestClock.adjust("5 minutes");
           yield* Queue.take(fixture.settingsReads);
           yield* reactor.drain;
           assert.deepStrictEqual(yield* Ref.get(fixture.commands), []);
@@ -302,7 +302,7 @@ describe("ThreadProgressReactor", () => {
             },
           ]);
 
-          yield* TestClock.adjust("10 minutes");
+          yield* TestClock.adjust("5 minutes");
           yield* Queue.take(fixture.settingsReads);
           yield* reactor.drain;
           assert.strictEqual((yield* Ref.get(fixture.commands)).length, 1);
@@ -312,7 +312,7 @@ describe("ThreadProgressReactor", () => {
               thread.id === active.id ? { ...thread, updatedAt: NOW } : thread,
             ),
           }));
-          yield* TestClock.adjust("10 minutes");
+          yield* TestClock.adjust("5 minutes");
           yield* Queue.take(fixture.settingsReads);
           yield* reactor.drain;
           const updated = yield* Ref.get(fixture.commands);
@@ -413,10 +413,10 @@ describe("ThreadProgressReactor", () => {
     ),
   );
 
-  it.effect("caps each sweep at the 25 newest candidates and two simultaneous generations", () =>
+  it.effect("caps each sweep at the 25 newest candidates and runs generations one at a time", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const bothStarted = yield* Deferred.make<void>();
+        const firstStarted = yield* Deferred.make<void>();
         const finishGeneration = yield* Deferred.make<void>();
         const inFlight = yield* Ref.make(0);
         const peak = yield* Ref.make(0);
@@ -432,10 +432,12 @@ describe("ThreadProgressReactor", () => {
             Effect.gen(function* () {
               const active = yield* Ref.updateAndGet(inFlight, (count) => count + 1);
               yield* Ref.update(peak, (count) => Math.max(count, active));
-              if (active === 2) {
-                yield* Deferred.succeed(bothStarted, undefined);
+              yield* Deferred.succeed(firstStarted, undefined);
+              // Only the first generation blocks; the fork serialises the
+              // sweep, so nothing else may start while it is held.
+              if (active === 1 && (yield* Ref.get(fixture.generationCalls)).length === 1) {
+                yield* Deferred.await(finishGeneration);
               }
-              yield* Deferred.await(finishGeneration);
               yield* Ref.update(inFlight, (count) => count - 1);
               return ESTIMATE;
             }),
@@ -444,11 +446,12 @@ describe("ThreadProgressReactor", () => {
           const reactor = yield* ThreadProgressReactor.ThreadProgressReactor;
           yield* reactor.start();
           yield* Deferred.succeed(fixture.activation, undefined);
-          yield* Deferred.await(bothStarted);
-          assert.strictEqual((yield* Ref.get(fixture.generationCalls)).length, 2);
+          yield* Deferred.await(firstStarted);
+          yield* Effect.yieldNow;
+          assert.strictEqual((yield* Ref.get(fixture.generationCalls)).length, 1);
           yield* Deferred.succeed(finishGeneration, undefined);
           yield* reactor.drain;
-          assert.strictEqual(yield* Ref.get(peak), 2);
+          assert.strictEqual(yield* Ref.get(peak), 1);
           const commands = yield* Ref.get(fixture.commands);
           assert.strictEqual(commands.length, 25);
           assert.deepStrictEqual(
