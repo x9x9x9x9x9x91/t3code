@@ -282,7 +282,6 @@ it.layer(ClaudeTextGenerationTestLayer)("ClaudeTextGeneration", (it) => {
     ["52.6", 53],
     ["150", 100],
     ["-5", 0],
-    ["1e999", 0],
   ] as const) {
     it.effect(`normalizes progress estimate ${percent} to ${expected}`, () =>
       withFakeClaudeEnv(

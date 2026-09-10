@@ -341,8 +341,11 @@ Return JSON { "percent": integer 0-100, "summary": one sentence naming what rema
 
 Thread contents:
 ${input.context}`;
+  // Schema.Number publishes an anyOf that also admits "Infinity"/"NaN"
+  // strings; the CLI's structured-output validator rejects plain numbers
+  // against it. Finite emits a bare number schema.
   const outputSchema = Schema.Struct({
-    percent: Schema.Number,
+    percent: Schema.Finite,
     summary: Schema.String,
   });
 
