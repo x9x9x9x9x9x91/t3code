@@ -15,10 +15,16 @@ import {
   type SidebarSection,
 } from "./Sidebar.logic";
 
-const thread = (key: string, section: SidebarSection): SidebarListItem => ({
+const thread = (key: string, section: SidebarSection, group?: string): SidebarListItem => ({
   kind: "thread",
   key,
   section,
+  ...(group === undefined ? {} : { group }),
+});
+const projectHeader = (group: string): SidebarListItem => ({
+  kind: "marker",
+  marker: "project-header",
+  group,
 });
 const marker = (marker: SidebarListMarker): SidebarListItem => ({ kind: "marker", marker });
 const pinnedHeader = marker("pinned-header");
@@ -40,7 +46,8 @@ function layout(
         ? (item.section === "pinned" || item.section === "active" ? cardHeight : 36) * scale
         : item.marker === "pinned-header" || item.marker === "pinned-divider"
           ? 0
-          : (item.marker.endsWith("placeholder") ? 0 : 32) * scale;
+          : (item.marker.endsWith("placeholder") ? 0 : item.marker === "project-header" ? 28 : 32) *
+            scale;
     const rect = { top, height, bottom: top + height, left: 0, right: 260, width: 260 };
     top += height + 1;
     return rect;
@@ -282,6 +289,106 @@ describe("sidebar drag projection", () => {
     }
     const lastIndex = items.length - 1;
     expect(strategy({ ...args, index: lastIndex })).toEqual(stationary);
+  });
+
+  const groupedItems = [
+    pinnedHeader,
+    divider,
+    projectHeader("repo:a"),
+    thread("a1", "active", "repo:a"),
+    thread("a2", "active", "repo:a"),
+    projectHeader("repo:b"),
+    thread("b1", "active", "repo:b"),
+    settledHeader,
+  ];
+
+  it.each([0.8, 1, 1.25])(
+    "stacks project headers with their measured heights at scale %s",
+    (scale) => {
+      const over = sidebarMarkerId("project-header", "repo:a");
+      const result = preview(
+        { items: groupedItems, settledOrder: [], settledExpanded: true },
+        "b1",
+        over,
+        scale,
+      );
+      const args = layout(groupedItems, "b1", over, scale);
+      const topOf = (id: string) => {
+        const index = groupedItems.findIndex((item) => sidebarListItemId(item) === id);
+        expect(result.get(id)?.scaleY).toBe(1);
+        return args.rects[index]!.top + result.get(id)!.y;
+      };
+      const headerB = topOf(sidebarMarkerId("project-header", "repo:b"));
+      expect(headerB).toBe(102);
+      const headerA = topOf(sidebarMarkerId("project-header", "repo:a"));
+      expect(headerA - headerB).toBeCloseTo((28 + 82) * scale + 2);
+      expect(topOf("a1") - headerA).toBeCloseTo(28 * scale + 1);
+      expect(topOf("a2") - topOf("a1")).toBeCloseTo(82 * scale + 1);
+      expect(topOf(sidebarMarkerId("settled-header")) - topOf("a2")).toBeCloseTo(82 * scale + 1);
+    },
+  );
+
+  it("returns a row dragged past another project to its own cluster at its new rank", () => {
+    const result = preview(
+      { items: groupedItems, settledOrder: [], settledExpanded: true },
+      "a1",
+      "b1",
+    );
+    expect(resolveSidebarDropTarget(groupedItems, "a1", "b1")?.activeOrder).toEqual([
+      "a2",
+      "a1",
+      "b1",
+    ]);
+    expect(result.get("a2")).toEqual({ ...stationary, y: -83 });
+    expect(result.get("b1")).toEqual(stationary);
+    for (const group of ["repo:a", "repo:b"]) {
+      expect(result.get(sidebarMarkerId("project-header", group))).toEqual(stationary);
+    }
+  });
+
+  it("removes the empty cluster when its last row leaves Active", () => {
+    const result = preview(
+      { items: groupedItems, settledOrder: [], settledExpanded: false },
+      "b1",
+      sidebarMarkerId("pinned-header"),
+    );
+    expect(result.get(sidebarMarkerId("project-header", "repo:b"))?.scaleY).toBe(0);
+    expect(result.get(sidebarMarkerId("project-header", "repo:a"))).toEqual({
+      ...stationary,
+      y: 83,
+    });
+    expect(result.get(sidebarMarkerId("settled-header"))?.y).toBe(-29);
+  });
+
+  it("opens a new cluster header for an incoming pinned row using the slim fallback", () => {
+    const items = [
+      pinnedHeader,
+      thread("p", "pinned", "repo:b"),
+      divider,
+      projectHeader("repo:a"),
+      thread("a", "active", "repo:a"),
+      projectHeader("repo:b"),
+      settledHeader,
+    ];
+    const strategy = createSidebarSortingStrategy({
+      items,
+      settledOrder: [],
+      settledExpanded: false,
+    });
+    const args = layout(items, "p", "a");
+    const pendingIndex = 5;
+    args.rects[pendingIndex] = {
+      ...args.rects[pendingIndex]!,
+      height: 0,
+      bottom: args.rects[pendingIndex]!.top,
+    };
+    args.rects[6] = {
+      ...args.rects[6]!,
+      top: args.rects[6]!.top - 28,
+      bottom: args.rects[6]!.bottom - 28,
+    };
+    expect(strategy({ ...args, index: pendingIndex })).toEqual({ ...stationary, y: -83 });
+    expect(strategy({ ...args, index: 6 })?.y).toBe(36);
   });
 
   const pinned = [

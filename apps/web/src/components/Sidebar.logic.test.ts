@@ -38,6 +38,7 @@ import {
   planPinnedReorder,
   planSidebarThreadDrop,
   sidebarMarkerId,
+  groupSidebarActiveThreads,
   sidebarListItemId,
   sortPinnedThreadsForSidebar,
   sortThreadsForSidebar,
@@ -1044,6 +1045,35 @@ describe("planPinnedReorder", () => {
   });
 });
 
+describe("groupSidebarActiveThreads", () => {
+  it("clusters logical projects in first-appearance order and preserves row order", () => {
+    const rows = [
+      { kind: "thread", key: "env1:a1", section: "active", group: "repo:a" },
+      { kind: "thread", key: "env1:b1", section: "active", group: "repo:b" },
+      { kind: "thread", key: "env2:a2", section: "active", group: "repo:a" },
+    ] as const;
+    expect(groupSidebarActiveThreads(rows).map(sidebarListItemId)).toEqual([
+      sidebarMarkerId("project-header", "repo:a"),
+      "env1:a1",
+      "env2:a2",
+      sidebarMarkerId("project-header", "repo:b"),
+      "env1:b1",
+    ]);
+    expect(groupSidebarActiveThreads(rows.toReversed()).map(sidebarListItemId)).toEqual([
+      sidebarMarkerId("project-header", "repo:a"),
+      "env2:a2",
+      "env1:a1",
+      sidebarMarkerId("project-header", "repo:b"),
+      "env1:b1",
+    ]);
+  });
+
+  it("leaves ungrouped rows unchanged", () => {
+    const rows = [{ kind: "thread", key: "env:a", section: "active" }] as const;
+    expect(groupSidebarActiveThreads(rows)).toEqual(rows);
+  });
+});
+
 describe("resolveSidebarDropTarget", () => {
   const thread = (key: string, section: SidebarSection): SidebarListItem => ({
     kind: "thread",
@@ -1066,6 +1096,43 @@ describe("resolveSidebarDropTarget", () => {
   ];
   const resolve = (activeKey: string, overId: string) =>
     resolveSidebarDropTarget(items, activeKey, overId);
+
+  it("encodes distinct, colon-free project header ids", () => {
+    const groups = ["repo:a", "repo:b", "repo%3Aa", "env:/repo:a"];
+    const ids = groups.map((group) =>
+      sidebarListItemId({ kind: "marker", marker: "project-header", group }),
+    );
+    expect(ids.every((id) => !id.includes(":"))).toBe(true);
+    expect(new Set(ids).size).toBe(groups.length);
+  });
+
+  it("treats project headers as active slots and returns only visual thread order", () => {
+    const list: SidebarListItem[] = [
+      marker("pinned-header"),
+      { ...thread("env:p", "pinned"), group: "repo:a" },
+      marker("pinned-divider"),
+      { kind: "marker", marker: "project-header", group: "repo:a" },
+      { ...thread("env:a1", "active"), group: "repo:a" },
+      { ...thread("env:a2", "active"), group: "repo:a" },
+      { kind: "marker", marker: "project-header", group: "repo:b" },
+      { ...thread("env:b", "active"), group: "repo:b" },
+      marker("settled-header"),
+    ];
+    expect(
+      resolveSidebarDropTarget(list, "env:p", sidebarMarkerId("project-header", "repo:b")),
+    ).toEqual({
+      section: "active",
+      pinnedOrder: [],
+      activeOrder: ["env:a1", "env:a2", "env:p", "env:b"],
+    });
+    expect(
+      resolveSidebarDropTarget(list, "env:b", sidebarMarkerId("project-header", "repo:a")),
+    ).toEqual({
+      section: "active",
+      pinnedOrder: ["env:p"],
+      activeOrder: ["env:b", "env:a1", "env:a2"],
+    });
+  });
 
   it("keeps marker-like scoped thread keys draggable", () => {
     const key = "marker:pinned-header";
