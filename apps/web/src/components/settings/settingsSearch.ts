@@ -164,7 +164,9 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "group-active-threads-by-project",
     title: "Group active threads by project",
     to: "/settings/general",
-    searchTerms: ["sidebar cluster repository active"],
+    searchTerms: [
+      "sidebar cluster repository active gap reorder move project up down right-click menu",
+    ],
   },
   {
     id: "auto-settle-inactive-threads",
