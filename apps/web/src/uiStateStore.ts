@@ -428,7 +428,25 @@ export function moveSidebarActiveGroup(
   };
 }
 
+/** Append groups not yet in the remembered order, keeping what is there. */
+export function rememberSidebarActiveGroups(
+  state: UiState,
+  visibleGroups: readonly string[],
+): UiState {
+  const missing = [...new Set(visibleGroups)].filter(
+    (group) => group.length > 0 && !state.sidebarActiveGroupOrder.includes(group),
+  );
+  if (missing.length === 0) {
+    return state;
+  }
+  return {
+    ...state,
+    sidebarActiveGroupOrder: [...state.sidebarActiveGroupOrder, ...missing],
+  };
+}
+
 interface UiStateStore extends UiState {
+  rememberSidebarActiveGroups: (visibleGroups: readonly string[]) => void;
   moveSidebarActiveGroup: (
     currentGroupOrder: readonly string[],
     groupKey: string,
@@ -449,6 +467,8 @@ interface UiStateStore extends UiState {
 
 export const useUiStateStore = create<UiStateStore>((set) => ({
   ...readPersistedState(),
+  rememberSidebarActiveGroups: (visibleGroups) =>
+    set((state) => rememberSidebarActiveGroups(state, visibleGroups)),
   moveSidebarActiveGroup: (currentGroupOrder, groupKey, direction) =>
     set((state) => moveSidebarActiveGroup(state, currentGroupOrder, groupKey, direction)),
   markThreadVisited: (threadId, visitedAt) =>

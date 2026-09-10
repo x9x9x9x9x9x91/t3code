@@ -6,6 +6,7 @@ import {
   markThreadUnread,
   markThreadVisited,
   moveSidebarActiveGroup,
+  rememberSidebarActiveGroups,
   parsePersistedState,
   PERSISTED_STATE_KEY,
   type PersistedUiState,
@@ -132,6 +133,20 @@ describe("uiStateStore pure functions", () => {
     expect(next.sidebarActiveGroupOrder).toEqual(expected);
     expect(state.sidebarActiveGroupOrder).toEqual(["a", "b", "c"]);
     expect(next.projectOrder).toBe(state.projectOrder);
+  });
+
+  it("remembers new groups below the saved order and keeps saved slots", () => {
+    const state = makeUiState({ sidebarActiveGroupOrder: ["b", "a"] });
+
+    const next = rememberSidebarActiveGroups(state, ["c", "a", "c", "", "b", "d"]);
+
+    expect(next.sidebarActiveGroupOrder).toEqual(["b", "a", "c", "d"]);
+    expect(state.sidebarActiveGroupOrder).toEqual(["b", "a"]);
+    expect(rememberSidebarActiveGroups(next, ["a", "d"])).toBe(next);
+    expect(rememberSidebarActiveGroups(makeUiState(), ["c", "a"]).sidebarActiveGroupOrder).toEqual([
+      "c",
+      "a",
+    ]);
   });
 
   it.each([{ savedOrder: [] }, { savedOrder: ["stale", "c"] }])(

@@ -1897,8 +1897,27 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               {thread.settledOverride !== "settled" &&
               thread.settledAt === null &&
               thread.progressEstimate ? (
-                // oxlint-disable-next-line t3code/no-native-title-tooltip -- Progress estimates intentionally use a native summary tooltip.
-                <span className="shrink-0 tabular-nums" title={thread.progressEstimate.summary}>
+                <span
+                  className="inline-flex shrink-0 items-center gap-1.5 tabular-nums"
+                  // oxlint-disable-next-line t3code/no-native-title-tooltip -- Progress estimates intentionally use a native summary tooltip.
+                  title={thread.progressEstimate.summary}
+                >
+                  {/* Fork: a small track next to the number so the estimate
+                      reads at a glance without parsing digits. */}
+                  <span
+                    aria-hidden
+                    className="inline-block h-1 w-8 overflow-hidden rounded-full bg-sidebar-foreground/15"
+                  >
+                    <span
+                      className={cn(
+                        "block h-full rounded-full",
+                        thread.progressEstimate.percent >= 100
+                          ? "bg-emerald-600 dark:bg-emerald-400"
+                          : "bg-sidebar-foreground/60",
+                      )}
+                      style={{ width: `${thread.progressEstimate.percent}%` }}
+                    />
+                  </span>
                   {thread.progressEstimate.percent}%
                 </span>
               ) : null}
@@ -2759,6 +2778,20 @@ export default function Sidebar() {
   useLayoutEffect(() => {
     activeSidebarItemsRef.current = activeSidebarItems;
   }, [activeSidebarItems]);
+  // Fork: project clusters keep their place. Without a remembered order the
+  // clusters follow first appearance in the activity sort, so a new thread in
+  // a lower project hoisted that whole project to the top. Remember every
+  // group the first time it shows; new groups append below, manual moves
+  // still win, and a group whose threads all settle keeps its slot for later.
+  useEffect(() => {
+    if (!groupActiveThreadsByProject) return;
+    const visibleGroups = activeSidebarItems.flatMap((item) =>
+      item.kind === "thread" && item.group !== undefined ? [item.group] : [],
+    );
+    if (visibleGroups.some((group) => !sidebarActiveGroupOrder.includes(group))) {
+      useUiStateStore.getState().rememberSidebarActiveGroups(visibleGroups);
+    }
+  }, [activeSidebarItems, groupActiveThreadsByProject, sidebarActiveGroupOrder]);
   // Visual order of the active rows. Drop planning and the optimistic hold
   // read this, not the key sort: clusters interleave rows whose keys are not
   // neighbours, and the planner keys a move off its visual neighbours.
