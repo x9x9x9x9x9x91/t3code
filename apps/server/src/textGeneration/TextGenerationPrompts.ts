@@ -323,6 +323,7 @@ export function buildThreadTitlePrompt(input: ThreadTitlePromptInput) {
 
 export function buildProgressEstimatePrompt(input: { context: string }) {
   const prompt = `You are estimating how complete a coding-agent thread is relative to its OVERALL goal.
+You have no tools: do not read files, run commands, or inspect anything. Judge only from the thread contents below.
 The goal includes everything the user asked across the whole thread, including later follow-ups and scope changes.
 A thread that finished its first task and then received a new request is NOT 100%.
 Percent is progress toward that whole, not toward the current step.
