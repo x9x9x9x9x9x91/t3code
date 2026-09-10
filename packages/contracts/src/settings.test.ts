@@ -288,8 +288,8 @@ describe("ClientSettings environment identification", () => {
 });
 
 describe("ClientSettings sidebar", () => {
-  it("keeps active project grouping opt-in and patchable", () => {
-    expect(decodeClientSettings({}).sidebarGroupActiveThreadsByProject).toBe(false);
+  it("defaults active project grouping on (fork) and keeps it patchable", () => {
+    expect(decodeClientSettings({}).sidebarGroupActiveThreadsByProject).toBe(true);
     expect(decodeClientSettingsPatch({})).not.toHaveProperty("sidebarGroupActiveThreadsByProject");
     for (const enabled of [true, false]) {
       const input = { sidebarGroupActiveThreadsByProject: enabled };
@@ -518,7 +518,11 @@ describe("ServerSettings.sourceControlWritingStyle", () => {
       followChangeRequestTemplates: true,
     });
     expect(settings.sourceControlWriterModelSelection).toBeNull();
-    expect(settings.progressEstimateModelSelection).toBeNull();
+    expect(settings.progressEstimateModelSelection).toEqual({
+      instanceId: "claudeAgent",
+      model: "claude-opus-5",
+      options: [{ id: "effort", value: "low" }],
+    });
   });
 
   it("trims partial style updates", () => {

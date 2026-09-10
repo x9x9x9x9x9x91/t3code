@@ -46,6 +46,11 @@ const ENABLED_SETTINGS = {
   ...DEFAULT_SERVER_SETTINGS,
   progressEstimateModelSelection: MODEL_SELECTION,
 };
+// The fork defaults the estimator on; the disabled case is explicit.
+const DISABLED_SETTINGS = {
+  ...DEFAULT_SERVER_SETTINGS,
+  progressEstimateModelSelection: null,
+};
 
 type ProgressCommand = Extract<
   OrchestrationCommand,
@@ -238,7 +243,7 @@ describe("ThreadProgressReactor", () => {
         yield* TestClock.setTime(Date.parse(NOW));
         const fixture = yield* makeHarness({
           snapshot: makeSnapshot([makeThread("active")]),
-          settings: DEFAULT_SERVER_SETTINGS,
+          settings: DISABLED_SETTINGS,
         });
         yield* Effect.gen(function* () {
           const reactor = yield* ThreadProgressReactor.ThreadProgressReactor;

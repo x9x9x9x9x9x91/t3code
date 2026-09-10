@@ -522,6 +522,8 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
       const serverConfig = yield* ServerConfig.ServerConfig;
       const fileSystem = yield* FileSystem.FileSystem;
+      // Fork default is on; start from the explicit off state.
+      yield* serverSettings.updateSettings({ progressEstimateModelSelection: null });
       assert.isNull((yield* serverSettings.getSettings).progressEstimateModelSelection);
       const progressEstimateModelSelection = {
         instanceId: ProviderInstanceId.make("codex"),
