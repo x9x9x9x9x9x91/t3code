@@ -4830,7 +4830,14 @@ export default function Sidebar() {
                               >
                                 <div className="absolute inset-x-0 top-0 flex h-7 items-center gap-2 px-2 text-xs font-medium text-sidebar-muted-foreground">
                                   {project ? (
-                                    <ProjectFavicon project={project} className="size-3 shrink-0" />
+                                    <ProjectFavicon
+                                      environmentId={project.environmentId}
+                                      cwd={project.workspaceRoot}
+                                      projectName={project.title}
+                                      faviconPath={project.faviconPath}
+                                      projectIcon={project.projectIcon}
+                                      className="size-3 shrink-0"
+                                    />
                                   ) : null}
                                   <span className="truncate">
                                     {project?.displayName ?? "Unknown project"}
