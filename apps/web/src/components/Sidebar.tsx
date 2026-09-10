@@ -2744,22 +2744,35 @@ export default function Sidebar() {
     return routeThread === undefined ? EMPTY_THREADS : [routeThread];
   }, [routeThreadKey, snoozedShelfExpanded, snoozedThreads]);
 
+  // Rows carry their logical project so the active section and the drag
+  // projection cluster the same way.
+  const toSidebarRow = useCallback(
+    (
+      thread: EnvironmentThreadShell,
+      section: SidebarSection,
+    ): Extract<SidebarListItem, { kind: "thread" }> => {
+      const projectKey = `${thread.environmentId}:${thread.projectId}` as const;
+      return {
+        kind: "thread",
+        key: scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+        section,
+        ...(groupActiveThreadsByProject
+          ? { group: projectGroupKeyByProjectKey.get(projectKey) ?? projectKey }
+          : {}),
+      };
+    },
+    [groupActiveThreadsByProject, projectGroupKeyByProjectKey],
+  );
   const activeSidebarItems = useMemo(
-    () =>
-      groupSidebarActiveThreads(
-        activeThreads.map((thread) => {
-          const projectKey = `${thread.environmentId}:${thread.projectId}` as const;
-          return {
-            kind: "thread",
-            key: scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-            section: "active",
-            ...(groupActiveThreadsByProject
-              ? { group: projectGroupKeyByProjectKey.get(projectKey) ?? projectKey }
-              : {}),
-          };
-        }),
-      ),
-    [activeThreads, groupActiveThreadsByProject, projectGroupKeyByProjectKey],
+    () => groupSidebarActiveThreads(activeThreads.map((thread) => toSidebarRow(thread, "active"))),
+    [activeThreads, toSidebarRow],
+  );
+  // Visual order of the active rows. Drop planning and the optimistic hold
+  // read this, not the key sort: clusters interleave rows whose keys are not
+  // neighbours, and the planner keys a move off its visual neighbours.
+  const activeKeys = useMemo(
+    () => activeSidebarItems.flatMap((item) => (item.kind === "thread" ? [item.key] : [])),
+    [activeSidebarItems],
   );
 
   const orderedThreads = useMemo(
@@ -2771,12 +2784,12 @@ export default function Sidebar() {
       ...pinnedThreads.map((thread) =>
         scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
       ),
-      ...activeSidebarItems.flatMap((item) => (item.kind === "thread" ? [item.key] : [])),
+      ...activeKeys,
       ...[...visibleSnoozedThreads, ...renderedSettledThreads].map((thread) =>
         scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
       ),
     ],
-    [activeSidebarItems, pinnedThreads, visibleSnoozedThreads, renderedSettledThreads],
+    [activeKeys, pinnedThreads, visibleSnoozedThreads, renderedSettledThreads],
   );
   // Rows call back into the click handler without carrying the ordered list as
   // a prop — a fresh array identity per shell update would defeat every row's
@@ -3195,13 +3208,6 @@ export default function Sidebar() {
       ),
     [pinnedThreads],
   );
-  const activeKeys = useMemo(
-    () =>
-      activeThreads.map((thread) =>
-        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-      ),
-    [activeThreads],
-  );
   useEffect(() => {
     if (optimisticDrop === null) return;
     const canonicalByKey = new Map(
@@ -3360,22 +3366,8 @@ export default function Sidebar() {
   // Include every visible row in the measured order. Older servers disable
   // pickup on their rows without changing where those rows render.
   const sidebarListItems = useMemo((): readonly SidebarListItem[] => {
-    const rowsOf = (
-      list: readonly EnvironmentThreadShell[],
-      section: SidebarSection,
-    ): Extract<SidebarListItem, { kind: "thread" }>[] =>
-      list.map((thread) => {
-        const key = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
-        const projectKey = `${thread.environmentId}:${thread.projectId}` as const;
-        return {
-          kind: "thread",
-          key,
-          section,
-          ...(groupActiveThreadsByProject
-            ? { group: projectGroupKeyByProjectKey.get(projectKey) ?? projectKey }
-            : {}),
-        };
-      });
+    const rowsOf = (list: readonly EnvironmentThreadShell[], section: SidebarSection) =>
+      list.map((thread) => toSidebarRow(thread, section));
     if (
       pinnedThreads.length +
         activeThreads.length +
@@ -3407,13 +3399,12 @@ export default function Sidebar() {
   }, [
     activeThreads.length,
     activeSidebarItems,
-    groupActiveThreadsByProject,
-    projectGroupKeyByProjectKey,
     pendingActiveProjectGroup,
     pinnedThreads,
     renderedSettledThreads,
     settledThreads.length,
     snoozedThreads.length,
+    toSidebarRow,
     visibleSnoozedThreads,
   ]);
   useEffect(() => {
@@ -4885,9 +4876,6 @@ export default function Sidebar() {
                                 className={cn(
                                   "relative mx-0.5",
                                   item.group === pendingActiveProjectGroup ? "-mb-px h-0" : "h-7",
-                                  item.group === pendingActiveProjectGroup &&
-                                    dragTargetSection !== "active" &&
-                                    "invisible",
                                 )}
                               >
                                 <div className="absolute inset-x-0 top-0 flex h-7 items-center gap-2 px-2 text-xs font-medium text-sidebar-muted-foreground">

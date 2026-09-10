@@ -11,6 +11,8 @@ import {
 } from "./Sidebar.logic";
 
 const stationary = { x: 0, y: 0, scaleX: 1, scaleY: 1 };
+/** Project cluster headers are h-7. */
+const PROJECT_HEADER_HEIGHT = 28;
 const hidden = { ...stationary, scaleY: 0 };
 type ThreadItem = Extract<SidebarListItem, { kind: "thread" }>;
 type Layout = Parameters<SortingStrategy>[0];
@@ -212,7 +214,8 @@ export function createSidebarSortingStrategy(input: {
           : item.kind === "marker" && item.marker.endsWith("placeholder")
             ? slimHeight
             : item.kind === "marker" && item.marker === "project-header"
-              ? rect?.height || slimHeight
+              ? // A header opened for an incoming cluster is zero-height at rest.
+                rect?.height || PROJECT_HEADER_HEIGHT * scale
               : moved
                 ? fallback
                 : (rect?.height ?? fallback);
