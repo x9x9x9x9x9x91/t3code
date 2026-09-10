@@ -389,6 +389,16 @@ describe("ClientSettings environment identification", () => {
 });
 
 describe("ClientSettings sidebar", () => {
+  it("keeps active project grouping opt-in and patchable", () => {
+    expect(decodeClientSettings({}).sidebarGroupActiveThreadsByProject).toBe(false);
+    expect(decodeClientSettingsPatch({})).not.toHaveProperty("sidebarGroupActiveThreadsByProject");
+    for (const enabled of [true, false]) {
+      const input = { sidebarGroupActiveThreadsByProject: enabled };
+      expect(decodeClientSettings(input).sidebarGroupActiveThreadsByProject).toBe(enabled);
+      expect(decodeClientSettingsPatch(input).sidebarGroupActiveThreadsByProject).toBe(enabled);
+    }
+  });
+
   it("defaults to the current sidebar", () => {
     expect(decodeClientSettings({}).legacySidebarEnabled).toBe(false);
   });
