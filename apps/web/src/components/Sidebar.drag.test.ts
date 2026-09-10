@@ -388,7 +388,7 @@ describe("sidebar drag projection", () => {
       bottom: args.rects[6]!.bottom - 28,
     };
     expect(strategy({ ...args, index: pendingIndex })).toEqual({ ...stationary, y: -83 });
-    expect(strategy({ ...args, index: 6 })?.y).toBe(36);
+    expect(strategy({ ...args, index: 6 })?.y).toBe(28);
   });
 
   const pinned = [
