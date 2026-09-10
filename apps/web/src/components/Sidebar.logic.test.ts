@@ -1044,24 +1044,51 @@ describe("groupSidebarActiveThreads", () => {
       { kind: "thread", key: "env2:a2", section: "active", group: "repo:a" },
     ] as const;
     expect(groupSidebarActiveThreads(rows).map(sidebarListItemId)).toEqual([
-      sidebarMarkerId("project-header", "repo:a"),
       "env1:a1",
       "env2:a2",
-      sidebarMarkerId("project-header", "repo:b"),
+      sidebarMarkerId("project-gap", "repo:b"),
       "env1:b1",
     ]);
     expect(groupSidebarActiveThreads(rows.toReversed()).map(sidebarListItemId)).toEqual([
-      sidebarMarkerId("project-header", "repo:a"),
       "env2:a2",
       "env1:a1",
-      sidebarMarkerId("project-header", "repo:b"),
+      sidebarMarkerId("project-gap", "repo:b"),
       "env1:b1",
     ]);
   });
 
+  it("applies preferred order, ignores stale keys, and appends remaining groups in appearance order", () => {
+    const rows = [
+      { kind: "thread", key: "a1", section: "active", group: "a" },
+      { kind: "thread", key: "b1", section: "active", group: "b" },
+      { kind: "thread", key: "c1", section: "active", group: "c" },
+      { kind: "thread", key: "a2", section: "active", group: "a" },
+      { kind: "thread", key: "d1", section: "active", group: "d" },
+    ] as const;
+
+    expect(
+      groupSidebarActiveThreads(rows, ["missing", "c", "c", "a"]).map(sidebarListItemId),
+    ).toEqual([
+      "c1",
+      sidebarMarkerId("project-gap", "a"),
+      "a1",
+      "a2",
+      sidebarMarkerId("project-gap", "b"),
+      "b1",
+      sidebarMarkerId("project-gap", "d"),
+      "d1",
+    ]);
+    expect(groupSidebarActiveThreads([], ["a"])).toEqual([]);
+    expect(groupSidebarActiveThreads([rows[0]], ["a"])).toEqual([rows[0]]);
+  });
+
   it("leaves ungrouped rows unchanged", () => {
-    const rows = [{ kind: "thread", key: "env:a", section: "active" }] as const;
-    expect(groupSidebarActiveThreads(rows)).toEqual(rows);
+    const rows = [
+      { kind: "thread", key: "env:a", section: "active" },
+      { kind: "thread", key: "env:b", section: "active" },
+      { kind: "thread", key: "env:c", section: "active" },
+    ] as const;
+    expect(groupSidebarActiveThreads(rows, ["stale", "env:c", "env:a"])).toEqual(rows);
   });
 });
 
@@ -1088,41 +1115,106 @@ describe("resolveSidebarDropTarget", () => {
   const resolve = (activeKey: string, overId: string) =>
     resolveSidebarDropTarget(items, activeKey, overId);
 
-  it("encodes distinct, colon-free project header ids", () => {
+  it("encodes distinct, colon-free project gap ids", () => {
     const groups = ["repo:a", "repo:b", "repo%3Aa", "env:/repo:a"];
     const ids = groups.map((group) =>
-      sidebarListItemId({ kind: "marker", marker: "project-header", group }),
+      sidebarListItemId({ kind: "marker", marker: "project-gap", group }),
     );
     expect(ids.every((id) => !id.includes(":"))).toBe(true);
     expect(new Set(ids).size).toBe(groups.length);
   });
 
-  it("treats project headers as active slots and returns only visual thread order", () => {
+  it("treats project gaps as active slots and returns only visual thread order", () => {
     const list: SidebarListItem[] = [
       marker("pinned-header"),
       { ...thread("env:p", "pinned"), group: "repo:a" },
       marker("pinned-divider"),
-      { kind: "marker", marker: "project-header", group: "repo:a" },
       { ...thread("env:a1", "active"), group: "repo:a" },
       { ...thread("env:a2", "active"), group: "repo:a" },
-      { kind: "marker", marker: "project-header", group: "repo:b" },
+      { kind: "marker", marker: "project-gap", group: "repo:b" },
       { ...thread("env:b", "active"), group: "repo:b" },
       marker("settled-header"),
     ];
     expect(
-      resolveSidebarDropTarget(list, "env:p", sidebarMarkerId("project-header", "repo:b")),
+      resolveSidebarDropTarget(list, "env:p", sidebarMarkerId("project-gap", "repo:b")),
     ).toEqual({
       section: "active",
       pinnedOrder: [],
       activeOrder: ["env:a1", "env:a2", "env:p", "env:b"],
     });
-    expect(
-      resolveSidebarDropTarget(list, "env:b", sidebarMarkerId("project-header", "repo:a")),
-    ).toEqual({
+    expect(resolveSidebarDropTarget(list, "env:b", "env:a1", ["repo:a", "repo:b"])).toEqual({
       section: "active",
       pinnedOrder: ["env:p"],
-      activeOrder: ["env:b", "env:a1", "env:a2"],
+      activeOrder: ["env:a1", "env:a2", "env:b"],
     });
+  });
+
+  it("plans grouped reorders against the saved visual order and reproduces it after key writes", () => {
+    const rows = [
+      {
+        kind: "thread",
+        key: "a1",
+        id: "a1",
+        section: "active",
+        group: "a",
+        activeOrderKey: "f",
+        createdAt: "2026-09-10T12:00:00Z",
+      },
+      {
+        kind: "thread",
+        key: "b1",
+        id: "b1",
+        section: "active",
+        group: "b",
+        activeOrderKey: "m",
+        createdAt: "2026-09-10T12:00:00Z",
+      },
+      {
+        kind: "thread",
+        key: "a2",
+        id: "a2",
+        section: "active",
+        group: "a",
+        activeOrderKey: "t",
+        createdAt: "2026-09-10T12:00:00Z",
+      },
+    ] as const;
+    const preferredOrder = ["b", "a"];
+    const visual = groupSidebarActiveThreads(rows, preferredOrder);
+    const list = [
+      marker("pinned-header"),
+      marker("pinned-divider"),
+      ...visual,
+      marker("settled-header"),
+    ];
+    const input = {
+      activeKey: "a2",
+      activeSection: "active" as const,
+      pinnedOrder: [],
+      pinnedKeysById: new Map(),
+      activeOrder: visual.flatMap((item) => (item.kind === "thread" ? [item.key] : [])),
+      activeKeysById: new Map(rows.map((row) => [row.key, row.activeOrderKey])),
+    };
+    const unchanged = resolveSidebarDropTarget(list, "a2", "a2", preferredOrder)!;
+    expect(planSidebarThreadDrop({ ...input, target: unchanged })).toEqual({ kind: "none" });
+
+    const target = resolveSidebarDropTarget(list, "a2", "a1", preferredOrder)!;
+    const plan = planSidebarThreadDrop({ ...input, target });
+    expect(plan.kind).toBe("move-active");
+    if (plan.kind !== "move-active") return;
+    expect(plan.order).toEqual(["b1", "a2", "a1"]);
+    const savedKeys = new Map(plan.assignments.map(({ id, orderKey }) => [id, orderKey]));
+    const committed = sortThreadsForSidebar(
+      rows.map((row) => ({
+        ...row,
+        activeOrderKey: savedKeys.get(row.id) ?? row.activeOrderKey,
+      })),
+    );
+    expect(
+      groupSidebarActiveThreads(committed, preferredOrder).flatMap((item) =>
+        item.kind === "thread" ? [item.key] : [],
+      ),
+    ).toEqual(plan.order);
   });
 
   it("keeps marker-like scoped thread keys draggable", () => {

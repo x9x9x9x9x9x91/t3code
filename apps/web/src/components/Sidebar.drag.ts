@@ -11,8 +11,8 @@ import {
 } from "./Sidebar.logic";
 
 const stationary = { x: 0, y: 0, scaleX: 1, scaleY: 1 };
-/** Project cluster headers are h-7. */
-const PROJECT_HEADER_HEIGHT = 28;
+/** Project cluster gaps are h-2.5. */
+export const PROJECT_GAP_HEIGHT = 10;
 const hidden = { ...stationary, scaleY: 0 };
 type ThreadItem = Extract<SidebarListItem, { kind: "thread" }>;
 type Layout = Parameters<SortingStrategy>[0];
@@ -34,6 +34,7 @@ export function createSidebarCollisionDetection(
   isValidTarget: (id: string) => boolean,
   options: {
     items?: readonly SidebarListItem[];
+    activeGroupOrder?: readonly string[];
     activationY?: number | null;
   } = {},
 ): CollisionDetection {
@@ -74,7 +75,12 @@ export function createSidebarCollisionDetection(
             if (!sections.has(id)) {
               sections.set(
                 id,
-                resolveSidebarDropTarget(items, String(args.active.id), id)?.section ?? null,
+                resolveSidebarDropTarget(
+                  items,
+                  String(args.active.id),
+                  id,
+                  options.activeGroupOrder,
+                )?.section ?? null,
               );
             }
             return sections.get(id) === boundarySection;
@@ -99,6 +105,7 @@ export function createSidebarCollisionDetection(
  * A zero scaleY marks rows/markers to hide while retaining their measured nodes. */
 export function createSidebarSortingStrategy(input: {
   items: readonly SidebarListItem[];
+  activeGroupOrder?: readonly string[];
   settledOrder: readonly string[];
   settledExpanded: boolean;
   settledVisibleCount?: number;
@@ -119,7 +126,12 @@ export function createSidebarSortingStrategy(input: {
     const active = items[activeIndex];
     const over = items[overIndex] ?? active;
     if (active?.kind !== "thread" || !over || !rects[0]) return [];
-    const target = resolveSidebarDropTarget(items, active.key, sidebarListItemId(over));
+    const target = resolveSidebarDropTarget(
+      items,
+      active.key,
+      sidebarListItemId(over),
+      input.activeGroupOrder,
+    );
     if (!target) return [];
     const groups: Record<SidebarSection, ThreadItem[]> = {
       pinned: [],
@@ -178,7 +190,9 @@ export function createSidebarSortingStrategy(input: {
     const section = (name: "active" | "settled") => {
       if (groups[name].length > 0)
         projected.push(
-          ...(name === "active" ? groupSidebarActiveThreads(groups.active) : groups[name]),
+          ...(name === "active"
+            ? groupSidebarActiveThreads(groups.active, input.activeGroupOrder)
+            : groups[name]),
         );
       else marker(`${name}-placeholder`);
     };
@@ -213,9 +227,9 @@ export function createSidebarSortingStrategy(input: {
           ? labelHeight
           : item.kind === "marker" && item.marker.endsWith("placeholder")
             ? slimHeight
-            : item.kind === "marker" && item.marker === "project-header"
-              ? // A header opened for an incoming cluster is zero-height at rest.
-                rect?.height || PROJECT_HEADER_HEIGHT * scale
+            : item.kind === "marker" && item.marker === "project-gap"
+              ? // A gap opened for an incoming cluster is zero-height at rest.
+                rect?.height || PROJECT_GAP_HEIGHT * scale
               : moved
                 ? fallback
                 : (rect?.height ?? fallback);
