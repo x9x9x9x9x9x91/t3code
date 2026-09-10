@@ -553,6 +553,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode
         ? ["Project Grouping"]
         : []),
+      ...(settings.sidebarGroupActiveThreadsByProject !==
+      DEFAULT_UNIFIED_SETTINGS.sidebarGroupActiveThreadsByProject
+        ? ["Group active threads by project"]
+        : []),
       ...(settings.sidebarAutoSettleAfterDays !==
       DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays
         ? ["Auto-settle inactive threads"]
@@ -665,6 +669,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.sidebarAutoSettleAfterDays,
       settings.sidebarAutoSettleOnMerge,
       settings.sidebarProjectGroupingMode,
+      settings.sidebarGroupActiveThreadsByProject,
       settings.sidebarThreadPreviewCount,
       settings.showSkillsInSlashMenu,
       settings.timestampFormat,
@@ -759,6 +764,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       panelAnimationDurationMs: DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs,
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
+      sidebarGroupActiveThreadsByProject:
+        DEFAULT_UNIFIED_SETTINGS.sidebarGroupActiveThreadsByProject,
       sidebarAutoSettleAfterDays: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays,
       sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
       responseStreamingMode: DEFAULT_UNIFIED_SETTINGS.responseStreamingMode,
@@ -2203,6 +2210,34 @@ export function GeneralSettingsPanel() {
                 });
               }}
               aria-label="Project grouping"
+            />
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("group-active-threads-by-project")}
+          description="Cluster the active list under one header per project."
+          resetAction={
+            settings.sidebarGroupActiveThreadsByProject !==
+            DEFAULT_UNIFIED_SETTINGS.sidebarGroupActiveThreadsByProject ? (
+              <SettingResetButton
+                label="group active threads by project"
+                onClick={() =>
+                  updateSettings({
+                    sidebarGroupActiveThreadsByProject:
+                      DEFAULT_UNIFIED_SETTINGS.sidebarGroupActiveThreadsByProject,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.sidebarGroupActiveThreadsByProject}
+              onCheckedChange={(checked) =>
+                updateSettings({ sidebarGroupActiveThreadsByProject: checked })
+              }
+              aria-label="Group active threads by project"
             />
           }
         />

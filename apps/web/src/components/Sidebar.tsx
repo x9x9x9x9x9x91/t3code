@@ -172,6 +172,7 @@ import {
   shouldNavigateAfterThreadPark,
   shouldRecedeSidebarThread,
   resolveWorkingStartedAt,
+  groupSidebarActiveThreads,
   sidebarListItemId,
   sidebarMarkerId,
   sortLogicalProjectsForSidebar,
@@ -550,12 +551,13 @@ const draftPenClassName = "size-3 shrink-0 text-amber-600 dark:text-amber-300/80
 // which resolveSidebarDropTarget turns into the section the gap sits in.
 function SortableSidebarMarker(props: {
   marker: SidebarListMarker;
+  group?: string | undefined;
   className?: string;
   children?: ReactNode;
   "data-testid"?: string;
 }) {
   const { setNodeRef, transform, transition } = useSortable({
-    id: sidebarMarkerId(props.marker),
+    id: sidebarMarkerId(props.marker, props.group),
     disabled: { draggable: true },
     animateLayoutChanges: animateSidebarLayoutChanges,
   });
@@ -2136,6 +2138,9 @@ export default function Sidebar() {
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
   const sidebarProjectSortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
+  const groupActiveThreadsByProject = useClientSettings(
+    (s) => s.sidebarGroupActiveThreadsByProject,
+  );
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const {
@@ -2329,6 +2334,18 @@ export default function Sidebar() {
         projectGroups.flatMap((group) =>
           group.memberProjects.map(
             (project) => [`${project.environmentId}:${project.id}`, group.displayName] as const,
+          ),
+        ),
+      ),
+    [projectGroups],
+  );
+
+  const projectGroupKeyByProjectKey = useMemo(
+    () =>
+      new Map(
+        projectGroups.flatMap((group) =>
+          group.memberProjects.map(
+            (project) => [`${project.environmentId}:${project.id}`, group.projectKey] as const,
           ),
         ),
       ),
@@ -2738,16 +2755,39 @@ export default function Sidebar() {
     return routeThread === undefined ? EMPTY_THREADS : [routeThread];
   }, [routeThreadKey, snoozedShelfExpanded, snoozedThreads]);
 
+  const activeSidebarItems = useMemo(
+    () =>
+      groupSidebarActiveThreads(
+        activeThreads.map((thread) => {
+          const projectKey = `${thread.environmentId}:${thread.projectId}` as const;
+          return {
+            kind: "thread",
+            key: scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+            section: "active",
+            ...(groupActiveThreadsByProject
+              ? { group: projectGroupKeyByProjectKey.get(projectKey) ?? projectKey }
+              : {}),
+          };
+        }),
+      ),
+    [activeThreads, groupActiveThreadsByProject, projectGroupKeyByProjectKey],
+  );
+
   const orderedThreads = useMemo(
     () => [...pinnedThreads, ...activeThreads, ...visibleSnoozedThreads, ...renderedSettledThreads],
     [pinnedThreads, activeThreads, visibleSnoozedThreads, renderedSettledThreads],
   );
   const orderedThreadKeys = useMemo(
-    () =>
-      orderedThreads.map((thread) =>
+    () => [
+      ...pinnedThreads.map((thread) =>
         scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
       ),
-    [orderedThreads],
+      ...activeSidebarItems.flatMap((item) => (item.kind === "thread" ? [item.key] : [])),
+      ...[...visibleSnoozedThreads, ...renderedSettledThreads].map((thread) =>
+        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+      ),
+    ],
+    [activeSidebarItems, pinnedThreads, visibleSnoozedThreads, renderedSettledThreads],
   );
   // Rows call back into the click handler without carrying the ordered list as
   // a prop — a fresh array identity per shell update would defeat every row's
@@ -3319,16 +3359,41 @@ export default function Sidebar() {
     },
     [sectionByThreadKey],
   );
+  const pendingActiveProjectGroup = useMemo(() => {
+    if (!groupActiveThreadsByProject || !dragState) return null;
+    const thread = threadByKey.get(dragState.activeKey);
+    if (!thread) return null;
+    const groupOf = (row: EnvironmentThreadShell) => {
+      const key = `${row.environmentId}:${row.projectId}` as const;
+      return projectGroupKeyByProjectKey.get(key) ?? key;
+    };
+    const group = groupOf(thread);
+    return activeThreads.some((row) => groupOf(row) === group) ? null : group;
+  }, [
+    activeThreads,
+    dragState,
+    groupActiveThreadsByProject,
+    projectGroupKeyByProjectKey,
+    threadByKey,
+  ]);
   // Include every visible row in the measured order. Older servers disable
   // pickup on their rows without changing where those rows render.
   const sidebarListItems = useMemo((): readonly SidebarListItem[] => {
     const rowsOf = (
       list: readonly EnvironmentThreadShell[],
       section: SidebarSection,
-    ): SidebarListItem[] =>
+    ): Extract<SidebarListItem, { kind: "thread" }>[] =>
       list.map((thread) => {
         const key = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
-        return { kind: "thread", key, section };
+        const projectKey = `${thread.environmentId}:${thread.projectId}` as const;
+        return {
+          kind: "thread",
+          key,
+          section,
+          ...(groupActiveThreadsByProject
+            ? { group: projectGroupKeyByProjectKey.get(projectKey) ?? projectKey }
+            : {}),
+        };
       });
     if (
       pinnedThreads.length +
@@ -3343,9 +3408,12 @@ export default function Sidebar() {
     const pinnedRows = rowsOf(pinnedThreads, "pinned");
     items.push(...pinnedRows);
     items.push({ kind: "marker", marker: "pinned-divider" });
-    const activeRows = rowsOf(activeThreads, "active");
     items.push({ kind: "marker", marker: "active-placeholder" });
-    items.push(...activeRows);
+    items.push(...activeSidebarItems);
+    // A thread entering Active may need a header that has no rows at rest.
+    if (pendingActiveProjectGroup !== null) {
+      items.push({ kind: "marker", marker: "project-header", group: pendingActiveProjectGroup });
+    }
     if (snoozedThreads.length > 0) {
       items.push({ kind: "marker", marker: "snoozed-header" });
       items.push(...rowsOf(visibleSnoozedThreads, "snoozed"));
@@ -3356,7 +3424,11 @@ export default function Sidebar() {
     items.push(...settledRows);
     return items;
   }, [
-    activeThreads,
+    activeThreads.length,
+    activeSidebarItems,
+    groupActiveThreadsByProject,
+    projectGroupKeyByProjectKey,
+    pendingActiveProjectGroup,
     pinnedThreads,
     renderedSettledThreads,
     settledThreads.length,
@@ -4700,9 +4772,11 @@ export default function Sidebar() {
                               null
                             }
                             projectDisplayName={
-                              projectDisplayNameByKey.get(
-                                `${thread.environmentId}:${thread.projectId}`,
-                              ) ?? null
+                              section === "active" && groupActiveThreadsByProject
+                                ? null
+                                : (projectDisplayNameByKey.get(
+                                    `${thread.environmentId}:${thread.projectId}`,
+                                  ) ?? null)
                             }
                             providerEntryByInstanceId={
                               providerEntriesByEnvironment.get(thread.environmentId) ??
@@ -4764,6 +4838,34 @@ export default function Sidebar() {
                           continue;
                         }
                         switch (item.marker) {
+                          case "project-header": {
+                            const project = projectGroupByScopeKey.get(item.group ?? "");
+                            items.push(
+                              <SortableSidebarMarker
+                                key={sidebarListItemId(item)}
+                                marker="project-header"
+                                group={item.group}
+                                data-testid="sidebar-project-header"
+                                className={cn(
+                                  "relative mx-0.5",
+                                  item.group === pendingActiveProjectGroup ? "-mb-px h-0" : "h-7",
+                                  item.group === pendingActiveProjectGroup &&
+                                    dragTargetSection !== "active" &&
+                                    "invisible",
+                                )}
+                              >
+                                <div className="absolute inset-x-0 top-0 flex h-7 items-center gap-2 px-2 text-xs font-medium text-sidebar-muted-foreground">
+                                  {project ? (
+                                    <ProjectFavicon project={project} className="size-3 shrink-0" />
+                                  ) : null}
+                                  <span className="truncate">
+                                    {project?.displayName ?? "Unknown project"}
+                                  </span>
+                                </div>
+                              </SortableSidebarMarker>,
+                            );
+                            break;
+                          }
                           case "pinned-header":
                             items.push(
                               <SidebarDragBoundary

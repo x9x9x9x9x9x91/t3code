@@ -128,18 +128,39 @@ export type SidebarListMarker =
   /** The boundary between pinned and active rows. */
   | "pinned-divider"
   | "snoozed-header"
-  | "settled-header";
+  | "settled-header"
+  | "project-header";
 
-export function sidebarMarkerId(marker: SidebarListMarker): string {
-  return `${SIDEBAR_MARKER_PREFIX}${marker}`;
+export function sidebarMarkerId(marker: SidebarListMarker, group?: string): string {
+  return `${SIDEBAR_MARKER_PREFIX}${marker}${marker === "project-header" ? `-${encodeURIComponent(group ?? "")}` : ""}`;
 }
 
 export type SidebarListItem =
-  | { readonly kind: "thread"; readonly key: string; readonly section: SidebarSection }
-  | { readonly kind: "marker"; readonly marker: SidebarListMarker };
+  | {
+      readonly kind: "thread";
+      readonly key: string;
+      readonly section: SidebarSection;
+      readonly group?: string;
+    }
+  | { readonly kind: "marker"; readonly marker: SidebarListMarker; readonly group?: string };
 
 export function sidebarListItemId(item: SidebarListItem): string {
-  return item.kind === "thread" ? item.key : sidebarMarkerId(item.marker);
+  return item.kind === "thread" ? item.key : sidebarMarkerId(item.marker, item.group);
+}
+
+/** Keep each project's rows together in first-appearance order. */
+export function groupSidebarActiveThreads(
+  items: readonly Extract<SidebarListItem, { kind: "thread" }>[],
+): SidebarListItem[] {
+  const groups = new Map<string | undefined, (typeof items)[number][]>();
+  for (const item of items) {
+    const group = groups.get(item.group);
+    if (group) group.push(item);
+    else groups.set(item.group, [item]);
+  }
+  return [...groups].flatMap(([group, rows]): SidebarListItem[] =>
+    group === undefined ? rows : [{ kind: "marker", marker: "project-header", group }, ...rows],
+  );
 }
 
 /** The section a slot belongs to, read off the markers around it: from
@@ -179,15 +200,18 @@ export function resolveSidebarDropTarget(
   const section = sectionAtSidebarSlot(moved, overIndex);
   if (section === "snoozed") return null;
   const pinnedOrder: string[] = [];
-  const activeOrder: string[] = [];
+  const activeRows: Extract<SidebarListItem, { kind: "thread" }>[] = [];
   let currentSection: SidebarSection = "pinned";
   for (const item of moved) {
     if (item.kind === "marker") {
       if (item.marker === "pinned-divider") currentSection = "active";
       else if (item.marker === "snoozed-header" || item.marker === "settled-header") break;
     } else if (currentSection === "pinned") pinnedOrder.push(item.key);
-    else activeOrder.push(item.key);
+    else activeRows.push(item);
   }
+  const activeOrder = groupSidebarActiveThreads(activeRows).flatMap((item) =>
+    item.kind === "thread" ? [item.key] : [],
+  );
   return { section, pinnedOrder, activeOrder };
 }
 

@@ -1,6 +1,7 @@
 import { closestCenter, type CollisionDetection, type Modifier } from "@dnd-kit/core";
 import { verticalListSortingStrategy, type SortingStrategy } from "@dnd-kit/sortable";
 import {
+  groupSidebarActiveThreads,
   resolveSidebarDropTarget,
   sidebarListItemId,
   sidebarMarkerId,
@@ -173,7 +174,10 @@ export function createSidebarSortingStrategy(input: {
     const projected: SidebarListItem[] = [];
     const marker = (name: SidebarListMarker) => projected.push({ kind: "marker", marker: name });
     const section = (name: "active" | "settled") => {
-      if (groups[name].length > 0) projected.push(...groups[name]);
+      if (groups[name].length > 0)
+        projected.push(
+          ...(name === "active" ? groupSidebarActiveThreads(groups.active) : groups[name]),
+        );
       else marker(`${name}-placeholder`);
     };
     marker("pinned-header");
@@ -203,9 +207,11 @@ export function createSidebarSortingStrategy(input: {
         ? labelHeight
         : item.kind === "marker" && item.marker.endsWith("placeholder")
           ? slimHeight
-          : moved
-            ? fallback
-            : (rect?.height ?? fallback);
+          : item.kind === "marker" && item.marker === "project-header"
+            ? rect?.height || slimHeight
+            : moved
+              ? fallback
+              : (rect?.height ?? fallback);
     });
     const firstShelf = items.findIndex(
       (item) =>
