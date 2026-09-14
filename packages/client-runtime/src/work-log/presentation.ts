@@ -32,6 +32,8 @@ export interface WorkLogPresentationEntry {
   readonly toolData?: unknown;
   readonly tone: "thinking" | "tool" | "info" | "error";
   readonly command?: string;
+  /** Provider-supplied plain-English summary of the command (Claude Bash `description`). */
+  readonly commandDescription?: string;
   readonly detail?: string;
   readonly viewedImagePath?: string;
   readonly changedFiles?: ReadonlyArray<string>;

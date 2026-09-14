@@ -486,6 +486,13 @@ export const ItemLifecyclePayload = Schema.Struct({
   status: Schema.optional(RuntimeItemStatus),
   title: Schema.optional(TrimmedNonEmptyStringSchema),
   detail: Schema.optional(TrimmedNonEmptyStringSchema),
+  /**
+   * Plain-English summary the provider sends with a command tool call (Claude's
+   * Bash `description`). Clients label the row with it instead of the program
+   * name parsed out of the command; the command itself stays in the expanded
+   * row. Adapters that send no such summary leave it unset.
+   */
+  commandDescription: Schema.optional(TrimmedNonEmptyStringSchema),
   toolSurface: Schema.optional(ToolActivitySurface),
   toolIcon: Schema.optional(ToolActivityIcon),
   toolSource: Schema.optional(ToolActivitySource),

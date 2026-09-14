@@ -808,6 +808,77 @@ describe("work entry labels", () => {
       });
     },
   );
+
+  it.each([
+    ["inProgress", "Running: Find the fork checkout"],
+    ["completed", "Ran: Find the fork checkout"],
+    ["failed", "Failed: Find the fork checkout"],
+    ["declined", "Declined: Find the fork checkout"],
+    ["stopped", "Stopped: Find the fork checkout"],
+  ] as const)(
+    "labels a %s command with the provider's description instead of the program name",
+    (toolLifecycleStatus, label) => {
+      const commandEntry = {
+        ...entry,
+        itemType: "command_execution" as const,
+        command: "git -C /Users/sin0/Coding/t3code-progress rev-parse HEAD",
+        commandDescription: "Find the fork checkout",
+        toolLifecycleStatus,
+      };
+      expect(
+        liveWorkEntryLabel(commandEntry, undefined, toolLifecycleStatus === "inProgress"),
+      ).toBe(label);
+    },
+  );
+
+  it("keeps the full command out of the row label but available to the expanded row", () => {
+    const command = "grep -rn 'liveWorkEntryLabel' apps/web/src";
+    const commandEntry = {
+      ...entry,
+      itemType: "command_execution" as const,
+      command,
+      commandDescription: "Find where the label is rendered",
+      detail: "3 matches",
+    };
+    expect(workEntryDisplayLabel(commandEntry, undefined)).toBe("Find where the label is rendered");
+    // The expanded row prints the command whenever it differs from the label.
+    expect(workEntryDisplayLabel(commandEntry, undefined)).not.toBe(command);
+    expect(commandEntry.command).toBe(command);
+  });
+
+  it("falls back to the program name when the provider sent no description", () => {
+    const commandEntry = { ...entry, command: "vp test run", detail: "All tests passed" };
+    expect(liveWorkEntryLabel(commandEntry, undefined, true)).toBe("Running vp");
+    expect(workEntryDisplayLabel(commandEntry, undefined)).toBe("vp test run");
+  });
+
+  it("summarizes a lone command row with the description", () => {
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "command-entry",
+          kind: "work",
+          createdAt: entry.createdAt,
+          entry: {
+            ...entry,
+            itemType: "command_execution",
+            command: "pnpm install",
+            commandDescription: "Install workspace dependencies",
+            toolLifecycleStatus: "completed",
+          },
+        },
+      ],
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaries: [],
+      supportsConversationRollback: false,
+    });
+    const directRow = rows.find((row) => row.kind === "work");
+    expect(directRow).toMatchObject({
+      isExpandedToolGroup: false,
+      displayLabel: "Install workspace dependencies",
+    });
+  });
 });
 
 describe("shouldPreserveAssistantLineBreaks", () => {

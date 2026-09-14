@@ -249,6 +249,8 @@ interface ToolInFlight {
   readonly toolName: string;
   readonly title: string;
   readonly detail?: string;
+  /** Claude's plain-English `description` for a Bash call, when it sent one. */
+  readonly commandDescription?: string;
   readonly input: Record<string, unknown>;
   readonly partialInputJson: string;
   readonly lastEmittedInputFingerprint?: string;
@@ -1419,6 +1421,26 @@ function summarizeToolRequest(toolName: string, input: Record<string, unknown>):
     return `${toolName}: ${serialized}`;
   }
   return `${toolName}: ${serialized.slice(0, 397)}...`;
+}
+
+const COMMAND_DESCRIPTION_MAX_LENGTH = 200;
+
+/**
+ * Claude sends a plain-English `description` with every Bash call ("Find the
+ * fork checkout"). It reads far better on a timeline row than the program name
+ * parsed out of the command, so carry it beside the command rather than
+ * dropping it. Only command rows use it: subagent tools put their description
+ * in the row label already (see summarizeToolRequest).
+ */
+function readToolCommandDescription(
+  itemType: CanonicalItemType,
+  input: Record<string, unknown>,
+): string | undefined {
+  if (itemType !== "command_execution") {
+    return undefined;
+  }
+  const description = typeof input.description === "string" ? input.description.trim() : "";
+  return description.length > 0 ? description.slice(0, COMMAND_DESCRIPTION_MAX_LENGTH) : undefined;
 }
 
 function titleForTool(itemType: CanonicalItemType): string {
@@ -2603,6 +2625,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           status: status === "completed" ? "completed" : "failed",
           title: tool.title,
           ...(tool.detail ? { detail: tool.detail } : {}),
+          ...(tool.commandDescription ? { commandDescription: tool.commandDescription } : {}),
           data: {
             toolName: tool.toolName,
             input: tool.input,
@@ -2795,6 +2818,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           ? classifyToolItemType(tool.toolName, parsedInput)
           : tool.itemType;
         const detail = parsedInput ? summarizeToolRequest(tool.toolName, parsedInput) : tool.detail;
+        const commandDescription = parsedInput
+          ? readToolCommandDescription(itemType, parsedInput)
+          : tool.commandDescription;
         let nextTool: ToolInFlight = {
           ...tool,
           itemType,
@@ -2802,6 +2828,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           partialInputJson,
           ...(parsedInput ? { input: parsedInput } : {}),
           ...(detail ? { detail } : {}),
+          ...(commandDescription ? { commandDescription } : {}),
         };
 
         const nextFingerprint =
@@ -2842,6 +2869,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             status: "inProgress",
             title: nextTool.title,
             ...(nextTool.detail ? { detail: nextTool.detail } : {}),
+            ...(nextTool.commandDescription
+              ? { commandDescription: nextTool.commandDescription }
+              : {}),
             ...(nextTool.agentId ? { agentId: nextTool.agentId } : {}),
             ...(nextTool.parentToolUseId ? { parentToolUseId: nextTool.parentToolUseId } : {}),
             data: {
@@ -2910,6 +2940,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const itemType = classifyToolItemType(toolName, toolInput);
       const itemId = block.id;
       const detail = summarizeToolRequest(toolName, toolInput);
+      const commandDescription = readToolCommandDescription(itemType, toolInput);
       const inputFingerprint =
         Object.keys(toolInput).length > 0 ? toolInputFingerprint(toolInput) : undefined;
 
@@ -2927,6 +2958,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         toolName,
         title: titleForTool(itemType),
         detail,
+        ...(commandDescription ? { commandDescription } : {}),
         input: toolInput,
         partialInputJson: "",
         ...(inputFingerprint ? { lastEmittedInputFingerprint: inputFingerprint } : {}),
@@ -2949,6 +2981,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           status: "inProgress",
           title: tool.title,
           ...(tool.detail ? { detail: tool.detail } : {}),
+          ...(tool.commandDescription ? { commandDescription: tool.commandDescription } : {}),
           ...(tool.agentId ? { agentId: tool.agentId } : {}),
           ...(tool.parentToolUseId ? { parentToolUseId: tool.parentToolUseId } : {}),
           data: {
@@ -3029,6 +3062,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           status: toolResult.isError ? "failed" : "inProgress",
           title: tool.title,
           ...(tool.detail ? { detail: tool.detail } : {}),
+          ...(tool.commandDescription ? { commandDescription: tool.commandDescription } : {}),
           ...(tool.agentId ? { agentId: tool.agentId } : {}),
           ...(tool.parentToolUseId ? { parentToolUseId: tool.parentToolUseId } : {}),
           data: toolData,
@@ -3083,6 +3117,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           status: itemStatus,
           title: tool.title,
           ...(tool.detail ? { detail: tool.detail } : {}),
+          ...(tool.commandDescription ? { commandDescription: tool.commandDescription } : {}),
           ...(tool.agentId ? { agentId: tool.agentId } : {}),
           ...(tool.parentToolUseId ? { parentToolUseId: tool.parentToolUseId } : {}),
           data: toolData,

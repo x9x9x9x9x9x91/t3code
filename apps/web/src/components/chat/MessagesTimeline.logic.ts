@@ -46,6 +46,8 @@ const TIMELINE_MINIMAP_PERSISTENT_GUTTER = 48;
 function singleToolCallLabel(entry: WorkLogEntry): string {
   const toolPresentation = resolveWorkEntryToolPresentation(entry, "completed");
   if (toolPresentation) return toolPresentation.displayName;
+  const commandDescription = entry.commandDescription?.trim();
+  if (commandDescription) return commandDescription;
   const command = entry.command?.trim();
   if (command) return command;
   const heading = normalizeCompactToolLabel(entry.toolTitle || entry.label);
@@ -55,6 +57,9 @@ function singleToolCallLabel(entry: WorkLogEntry): string {
 export function workEntryDisplayLabel(entry: WorkLogEntry, workspaceRoot: string | undefined) {
   const toolPresentation = resolveWorkEntryToolPresentation(entry);
   if (toolPresentation) return toolPresentation.displayName;
+  // The provider's own summary of the call beats the command string; the
+  // command stays in the expanded row, which keys off this label.
+  if (entry.commandDescription) return entry.commandDescription;
   if (entry.command) return entry.command;
   if (entry.detail) return entry.detail;
   const [firstPath] = entry.changedFiles ?? [];
@@ -80,7 +85,8 @@ export function liveWorkEntryLabel(
   });
   if (toolPresentation) return toolPresentation.displayName;
   const command = entry.command?.trim();
-  if (command) {
+  const commandDescription = entry.commandDescription?.trim();
+  if (command || commandDescription) {
     const verb =
       status === "inProgress"
         ? "Running"
@@ -91,7 +97,9 @@ export function liveWorkEntryLabel(
             : status === "stopped"
               ? "Stopped"
               : "Ran";
-    return `${verb} ${commandProgramName(command) ?? "command"}`;
+    // "Running: Find the fork checkout" says more than "Running git".
+    if (commandDescription) return `${verb}: ${commandDescription}`;
+    return `${verb} ${(command && commandProgramName(command)) ?? "command"}`;
   }
   return workEntryDisplayLabel(entry, workspaceRoot);
 }
