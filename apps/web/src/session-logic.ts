@@ -61,6 +61,8 @@ export interface WorkLogEntry {
   viewedImagePath?: string;
   command?: string;
   rawCommand?: string;
+  /** Provider-supplied plain-English summary of the command (Claude Bash `description`). */
+  commandDescription?: string;
   changedFiles?: ReadonlyArray<string>;
   tone: "thinking" | "tool" | "info" | "error";
   toolTitle?: string;
@@ -566,6 +568,10 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   if (commandPreview.rawCommand) {
     entry.rawCommand = commandPreview.rawCommand;
   }
+  const commandDescription = asTrimmedString(payload?.commandDescription);
+  if (commandDescription) {
+    entry.commandDescription = commandDescription;
+  }
   if (changedFiles.length > 0) {
     entry.changedFiles = changedFiles;
   }
@@ -802,6 +808,7 @@ function mergeDerivedWorkLogEntries(
   const viewedImagePath = next.viewedImagePath ?? previous.viewedImagePath;
   const command = next.command ?? previous.command;
   const rawCommand = next.rawCommand ?? previous.rawCommand;
+  const commandDescription = next.commandDescription ?? previous.commandDescription;
   const toolTitle = next.toolTitle ?? previous.toolTitle;
   const toolSurface = next.toolSurface ?? previous.toolSurface;
   const toolIcon = next.toolIcon ?? previous.toolIcon;
@@ -819,6 +826,7 @@ function mergeDerivedWorkLogEntries(
     ...(viewedImagePath ? { viewedImagePath } : {}),
     ...(command ? { command } : {}),
     ...(rawCommand ? { rawCommand } : {}),
+    ...(commandDescription ? { commandDescription } : {}),
     ...(changedFiles.length > 0 ? { changedFiles } : {}),
     ...(toolTitle ? { toolTitle } : {}),
     ...(toolSurface ? { toolSurface } : {}),

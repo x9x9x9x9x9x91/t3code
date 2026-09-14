@@ -1157,6 +1157,7 @@ describe("ClaudeAdapterLive", () => {
             name: "Bash",
             input: {
               command: "ls",
+              description: "List files in the worktree",
             },
           },
         },
@@ -1227,6 +1228,16 @@ describe("ClaudeAdapterLive", () => {
       assert.equal(toolStarted?.type, "item.started");
       if (toolStarted?.type === "item.started") {
         assert.equal(toolStarted.payload.itemType, "command_execution");
+        assert.equal(toolStarted.payload.commandDescription, "List files in the worktree");
+      }
+
+      const toolCompleted = runtimeEvents.find(
+        (event) =>
+          event.type === "item.completed" && event.payload.itemType === "command_execution",
+      );
+      assert.equal(toolCompleted?.type, "item.completed");
+      if (toolCompleted?.type === "item.completed") {
+        assert.equal(toolCompleted.payload.commandDescription, "List files in the worktree");
       }
 
       const assistantCompletedIndex = runtimeEvents.findIndex(
@@ -1985,6 +1996,9 @@ describe("ClaudeAdapterLive", () => {
       if (toolStarted?.type === "item.started") {
         assert.equal(toolStarted.payload.itemType, "collab_agent_tool_call");
         assert.equal(toolStarted.payload.title, "Subagent task");
+        // A subagent task's description is already the row label; only command
+        // rows carry it as a separate field.
+        assert.equal(toolStarted.payload.commandDescription, undefined);
       }
       const completed = runtimeEvents.find((event) => event.type === "turn.completed");
       assert.equal(completed?.type, "turn.completed");

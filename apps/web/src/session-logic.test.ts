@@ -788,6 +788,62 @@ describe("deriveWorkLogEntries", () => {
     expect(entry?.command).toBe("bun run lint");
   });
 
+  it("keeps the provider's command description alongside the command", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "command-tool-described",
+        kind: "tool.completed",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          commandDescription: "Find the fork checkout",
+          data: {
+            item: {
+              command: ["git", "rev-parse", "HEAD"],
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry?.command).toBe("git rev-parse HEAD");
+    expect(entry?.commandDescription).toBe("Find the fork checkout");
+  });
+
+  it("carries the command description forward when a tool row is merged", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "described-start",
+        kind: "tool.updated",
+        summary: "Command run",
+        payload: {
+          itemType: "command_execution",
+          toolCallId: "tool-described",
+          status: "inProgress",
+          commandDescription: "Find the fork checkout",
+          data: { item: { command: "git rev-parse HEAD" } },
+        },
+      }),
+      makeActivity({
+        id: "described-end",
+        sequence: 1,
+        kind: "tool.completed",
+        summary: "Command run",
+        payload: {
+          itemType: "command_execution",
+          toolCallId: "tool-described",
+          status: "completed",
+          data: { item: { command: "git rev-parse HEAD" } },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.commandDescription).toBe("Find the fork checkout");
+  });
+
   it("extracts failed tool lifecycle status from item payloads", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

@@ -122,6 +122,34 @@ describe("runtimeEventToActivities tool streaming persistence", () => {
     expect(JSON.stringify(data).length).toBeLessThan(1_000);
   });
 
+  it("keeps the command description on the row after the data projection slims the payload", () => {
+    const event = {
+      ...base,
+      type: "item.updated",
+      eventId: EventId.make("evt-tool-described"),
+      payload: {
+        itemType: "command_execution",
+        status: "inProgress",
+        title: "Command run",
+        detail: "Bash: git rev-parse HEAD",
+        commandDescription: "Find the fork checkout",
+        data: {
+          toolName: "Bash",
+          input: { command: "git rev-parse HEAD", description: "Find the fork checkout" },
+        },
+      },
+    } satisfies ProviderRuntimeEvent;
+
+    const activities = runtimeEventToActivities(event);
+
+    expect(activities).toHaveLength(1);
+    const payload = activities[0]?.payload as Record<string, unknown>;
+    expect(payload.commandDescription).toBe("Find the fork checkout");
+    // The projection drops everything in `data` that no client reads, so the
+    // description has to travel as its own payload field.
+    expect((payload.data as Record<string, unknown>).input).toBeUndefined();
+  });
+
   it("persists the full terminal payload on tool.completed", () => {
     const event = {
       ...base,
