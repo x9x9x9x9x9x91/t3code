@@ -4182,6 +4182,124 @@ describe("PreviewManager", () => {
       ),
     );
   }
+
+  // A remote object handle: what CDP sends for `returnByValue: false`, and for
+  // an object it cannot serialize. There is no `value` to read, only metadata.
+  const remoteObjectHandles = [
+    {
+      label: "a plain object handle",
+      expression: "window",
+      result: { type: "object", objectId: "obj-1" },
+      named: ["object"],
+    },
+    {
+      label: "an array handle",
+      expression: "[1, 2, 3]",
+      result: {
+        type: "object",
+        subtype: "array",
+        className: "Array",
+        description: "Array(3)",
+        objectId: "obj-2",
+      },
+      named: ["object", "array", "Array", "Array(3)"],
+    },
+  ] as const;
+
+  for (const { label, expression, result, named } of remoteObjectHandles) {
+    effectIt.effect(`fails instead of answering null when the result is ${label}`, () =>
+      withManager((manager) =>
+        Effect.gen(function* () {
+          const capturePage = vi.fn(async () => ({
+            toJPEG: () => Buffer.from("unused-capture"),
+            getSize: () => ({ width: 1280, height: 720 }),
+          }));
+          const wc = makeTestPreviewWebContents(capturePage);
+          Object.assign(wc, { isDevToolsOpened: () => false });
+          Object.assign(wc.debugger, {
+            sendCommand: vi.fn(async (method: string) =>
+              method === "Runtime.evaluate" ? { result } : undefined,
+            ),
+          });
+          fromId.mockReturnValue(wc);
+          yield* manager.createTab("tab_1");
+          yield* manager.registerWebview("tab_1", 42);
+
+          const exit = yield* Effect.exit(
+            manager.automationEvaluate("tab_1", { expression, returnByValue: false }),
+          );
+
+          expect(Exit.isFailure(exit)).toBe(true);
+          if (Exit.isSuccess(exit)) return;
+          const error = Option.getOrThrow(Cause.findErrorOption(exit.cause));
+          expect(error).toMatchObject({
+            _tag: "PreviewOperationError",
+            operation: "automationEvaluate.encodeResult",
+          });
+          const cause = String((error as { readonly cause?: unknown }).cause);
+          for (const fragment of named) expect(cause).toContain(fragment);
+          // The handle is a page-side pointer, never something the agent can use.
+          expect(cause).not.toContain(result.objectId);
+        }),
+      ),
+    );
+  }
+
+  // The results that stay successful, so rejecting a handle cannot swallow a
+  // real value: the CDP null, the falsy primitives, and an explicit `value`
+  // alongside a stray `unserializableValue`.
+  const serializableCdpResults = [
+    {
+      label: "the CDP null",
+      expression: "null",
+      result: { type: "object", subtype: "null", value: null },
+      value: null,
+    },
+    {
+      label: "an empty string",
+      expression: '""',
+      result: { type: "string", value: "" },
+      value: "",
+    },
+    { label: "zero", expression: "0", result: { type: "number", value: 0 }, value: 0 },
+    {
+      label: "false",
+      expression: "false",
+      result: { type: "boolean", value: false },
+      value: false,
+    },
+    {
+      label: "a value that also carries unserializableValue",
+      expression: "-0",
+      result: { type: "number", value: 0, unserializableValue: "-0" },
+      value: 0,
+    },
+  ] as const;
+
+  for (const { label, expression, result, value } of serializableCdpResults) {
+    effectIt.effect(`answers with the value when the result is ${label}`, () =>
+      withManager((manager) =>
+        Effect.gen(function* () {
+          const capturePage = vi.fn(async () => ({
+            toJPEG: () => Buffer.from("unused-capture"),
+            getSize: () => ({ width: 1280, height: 720 }),
+          }));
+          const wc = makeTestPreviewWebContents(capturePage);
+          Object.assign(wc, { isDevToolsOpened: () => false });
+          Object.assign(wc.debugger, {
+            sendCommand: vi.fn(async (method: string) =>
+              method === "Runtime.evaluate" ? { result } : undefined,
+            ),
+          });
+          fromId.mockReturnValue(wc);
+          yield* manager.createTab("tab_1");
+          yield* manager.registerWebview("tab_1", 42);
+
+          expect(yield* manager.automationEvaluate("tab_1", { expression })).toBe(value);
+        }),
+      ),
+    );
+  }
 });
 
 describe("PreviewOperationError", () => {
