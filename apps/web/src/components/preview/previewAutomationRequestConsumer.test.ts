@@ -233,6 +233,7 @@ describe("previewAutomationRequestConsumer", () => {
       }),
     ).toEqual({
       _tag: "PreviewAutomationTabNotFoundError",
+      hostTag: "PreviewAutomationTargetUnavailableError",
       message:
         "Preview automation target for click request request-1 is unavailable on environment environment-1 thread thread-1 (tab tab-1, bridge unavailable).",
       detail: {
@@ -310,6 +311,7 @@ describe("previewAutomationRequestConsumer", () => {
       ),
     ).toEqual({
       _tag: "PreviewAutomationTargetNotEditableError",
+      hostTag: "PreviewAutomationTargetNotEditableHostError",
       message:
         "Preview automation type request request-type requires an editable target in tab tab-1.",
       detail: {
@@ -337,6 +339,7 @@ describe("previewAutomationRequestConsumer", () => {
 
     expect(response).toEqual({
       _tag: "PreviewAutomationExecutionError",
+      hostTag: "PreviewAutomationOperationError",
       message:
         "Preview automation snapshot request request-2 failed on environment environment-1 thread thread-1 (tab tab-1).",
       detail: {
@@ -390,6 +393,7 @@ describe("previewAutomationRequestConsumer", () => {
       ok: false,
       error: {
         _tag: "PreviewAutomationExecutionError",
+        hostTag: "PreviewAutomationOperationError",
         message:
           "Preview automation click request request-failed failed on environment environment-1 thread thread-1 (tab tab-1).",
         detail: {
