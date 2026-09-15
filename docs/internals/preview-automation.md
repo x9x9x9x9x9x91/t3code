@@ -1,20 +1,46 @@
 # Preview automation on a hidden tab
 
 The preview tools (`preview_snapshot`, `preview_resize`, `preview_evaluate`, …)
-drive a real Electron `WebContentsView` through CDP. When the preview panel is
-closed the tab still exists and still runs script, but it is parked offscreen and
-Chromium stops compositing it. Two consequences shape every render check an agent
-writes:
+drive a real Electron `WebContentsView` through CDP. With the preview panel
+closed the tab still exists and still runs script, so `preview_evaluate` keeps
+working: script execution needs no composited frame. `preview_snapshot` is the
+one that fails there, and why is still open.
 
-- `preview_snapshot` depends on a composited frame. On a hidden tab the capture
-  retries and gives up, so an agent that only knows how to look at pixels is
-  blocked whenever the user has the panel closed.
-- `preview_resize` resizes the host view, and the host then waits for the
-  renderer to report the new viewport. That wait costs the request's whole
-  budget when nothing is painting.
+`preview_resize` resizes the host view and waits for the renderer to report the
+new viewport. That wait is bounded by the request's host deadline, so a renderer
+that never reports costs the wait rather than the whole request, and the agent
+gets the viewport timeout instead of the broker's generic one.
 
-`preview_evaluate` keeps working, because script execution does not need a
-composited frame. So the interim render check is a measurement, not a screenshot.
+## The snapshot failure is unexplained
+
+The obvious story — panel closed, so the guest is offscreen, so capture fails —
+is not established, and the code argues against it. Automation takes a surface
+activity lease for the whole operation and releases it in a `finally`
+(`acquireBrowserSurfaceActivity` in `apps/web/src/components/preview/PreviewAutomationHosts.tsx`),
+and it waits for the wrapper to report `data-preview-rendering="active"` before
+probing. That activity is what keeps a hidden guest paintable:
+`resolveHostedBrowserWebviewWrapperStyle` (`apps/web/src/browser/hostedBrowserWebviewStyle.ts`)
+parks a rendering-active guest at `(0,0)` behind the app exactly because Electron
+stops compositing a guest that sits fully outside the window.
+
+What was observed, on 2026-09-14 with the panel closed: five `preview_snapshot`
+calls failed in 6–14 s each and the agent saw only `Preview snapshot failed.`
+The snapshot failure path puts the error class in `structuredContent` but not in
+the text (`apps/server/src/mcp/McpHttpServer.ts`), and the server traces from
+that day have rotated, so the class behind those five is unrecoverable. Capture
+never starting, `capturePage` rejecting or stalling through all three attempts,
+and the request simply losing to the broker timeout are all still open.
+
+Settling it needs a live run against the installed app, which takes separate
+authorisation: capture the same page and build twice, once hidden and once visible,
+and record per capture attempt — correlated request id and runtime tab id, the
+surface lease and `data-preview-rendering` state during the request, elapsed time
+to overlay readiness, CDP evaluation and AX-tree time, each `capturePage` attempt
+and its outcome, and the concrete desktop failure class. That distinguishes
+capture that never starts from capture that fails, stalls, or succeeds after the
+broker has given up. Verify any fix with a returned image, not a unit test.
+
+Until then the render check below is a measurement, not a screenshot.
 
 ## The render-check shape: a hidden 390 px iframe
 
@@ -88,5 +114,6 @@ fixed` is relative to the frame, and code that reads `window.top` or
 `visualViewport` sees the host page. It also produces no pixels, so it cannot
 catch a colour, a font fallback, or a z-order mistake.
 
-For those, ask the user to open the preview panel and take a real
-`preview_snapshot`.
+For those, ask the user to open the preview panel and try a real
+`preview_snapshot` — whether an open panel is what makes capture work is the
+open question above.
