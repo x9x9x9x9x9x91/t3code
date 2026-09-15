@@ -250,16 +250,37 @@ const artifactSiteSlug = (rawUrl: string): string => {
   }
 };
 
+interface CdpRemoteObject {
+  readonly type?: string;
+  readonly value?: unknown;
+  readonly unserializableValue?: string;
+  readonly description?: string;
+}
+
 interface CdpEvaluationResult {
-  readonly result?: {
-    readonly value?: unknown;
-    readonly description?: string;
-  };
+  readonly result?: CdpRemoteObject;
   readonly exceptionDetails?: {
     readonly text?: string;
     readonly exception?: { readonly description?: string };
   };
 }
+
+/**
+ * CDP sends no `value` for a result JSON cannot carry: `1n`, `NaN`, `Infinity`
+ * and `-0` arrive as `unserializableValue`, and a symbol or a function arrives
+ * as its type alone. Reading `value` alone would answer `null` for all of them,
+ * so evaluate fails instead and names what the page returned. A result that is
+ * genuinely `undefined` has neither, and still answers `null`.
+ */
+const unserializableEvaluationResult = (result: CdpRemoteObject | undefined): string | null => {
+  if (result === undefined || result.value !== undefined) return null;
+  if (result.unserializableValue !== undefined) {
+    return `${result.type ?? "unknown"} ${result.unserializableValue}`;
+  }
+  return result.type === "bigint" || result.type === "symbol" || result.type === "function"
+    ? result.type
+    : null;
+};
 
 export const PreviewAutomationSelectorKind = Schema.Literals([
   "focused-element",
@@ -1524,13 +1545,14 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     return yield* control.semaphore.withPermit(execute().pipe(Effect.onExit(finalize)));
   });
 
-  const evaluateWithDebugger = <A = unknown>(
+  /** The whole remote object, for callers that need more than its plain value. */
+  const evaluateRemoteObject = (
     tabId: string,
     send: SendCommand,
     expression: string,
     returnByValue: boolean,
     awaitPromise = true,
-  ): Effect.Effect<A, PreviewManagerError> =>
+  ): Effect.Effect<CdpRemoteObject | undefined, PreviewManagerError> =>
     send("Runtime.evaluate", {
       expression,
       awaitPromise,
@@ -1540,7 +1562,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       Effect.flatMap((rawResponse) => {
         const response = rawResponse as CdpEvaluationResult;
         if (!response.exceptionDetails) {
-          return Effect.succeed(response.result?.value as A);
+          return Effect.succeed(response.result);
         }
         const detail = previewAutomationEvaluationDetail(response.exceptionDetails);
         return Effect.fail(
@@ -1552,6 +1574,17 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           }),
         );
       }),
+    );
+
+  const evaluateWithDebugger = <A = unknown>(
+    tabId: string,
+    send: SendCommand,
+    expression: string,
+    returnByValue: boolean,
+    awaitPromise = true,
+  ): Effect.Effect<A, PreviewManagerError> =>
+    evaluateRemoteObject(tabId, send, expression, returnByValue, awaitPromise).pipe(
+      Effect.map((result) => result?.value as A),
     );
 
   const automationLocator = (input: {
@@ -4324,14 +4357,22 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   const performAutomationEvaluate = Effect.fn("PreviewManager.performAutomationEvaluate")(
     function* (tabId: string, input: PreviewAutomationEvaluateInput, send: SendCommand) {
       yield* send("Runtime.enable");
-      const value = yield* evaluateWithDebugger(
+      const remote = yield* evaluateRemoteObject(
         tabId,
         send,
         input.expression,
         input.returnByValue ?? true,
         input.awaitPromise ?? true,
       );
-      const result = jsonSerializableEvaluationResult(value);
+      const unserializable = unserializableEvaluationResult(remote);
+      if (unserializable !== null) {
+        return yield* new PreviewOperationError({
+          operation: "automationEvaluate.encodeResult",
+          tabId,
+          cause: new Error(`Evaluation result has no JSON form: ${unserializable}`),
+        });
+      }
+      const result = jsonSerializableEvaluationResult(remote?.value);
       const serialized = yield* encodeJson(
         { operation: "automationEvaluate.encodeResult", tabId },
         result,

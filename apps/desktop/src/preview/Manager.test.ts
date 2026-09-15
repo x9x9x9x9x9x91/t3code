@@ -4355,6 +4355,73 @@ describe("PreviewManager", () => {
       }),
     ),
   );
+
+  // Every result CDP reports without a `value`, as the protocol actually sends it.
+  const unserializableCdpResults = [
+    {
+      label: "a BigInt",
+      expression: "1n",
+      result: { type: "bigint", unserializableValue: "1n", description: "1n" },
+    },
+    {
+      label: "NaN",
+      expression: "0/0",
+      result: { type: "number", unserializableValue: "NaN", description: "NaN" },
+    },
+    {
+      label: "Infinity",
+      expression: "1/0",
+      result: { type: "number", unserializableValue: "Infinity", description: "Infinity" },
+    },
+    {
+      label: "negative zero",
+      expression: "-0",
+      result: { type: "number", unserializableValue: "-0", description: "-0" },
+    },
+    {
+      label: "a symbol",
+      expression: "Symbol('marker')",
+      result: { type: "symbol", description: "Symbol(marker)" },
+    },
+  ] as const;
+
+  for (const { label, expression, result } of unserializableCdpResults) {
+    effectIt.effect(`fails instead of answering null when the result is ${label}`, () =>
+      withManager((manager) =>
+        Effect.gen(function* () {
+          const capturePage = vi.fn(async () => ({
+            toJPEG: () => Buffer.from("unused-capture"),
+            getSize: () => ({ width: 1280, height: 720 }),
+          }));
+          const wc = makeTestPreviewWebContents(capturePage);
+          Object.assign(wc, { isDevToolsOpened: () => false });
+          Object.assign(wc.debugger, {
+            sendCommand: vi.fn(async (method: string) =>
+              method === "Runtime.evaluate" ? { result } : undefined,
+            ),
+          });
+          fromId.mockReturnValue(wc);
+          yield* manager.createTab("tab_1");
+          yield* manager.registerWebview("tab_1", 42);
+
+          const exit = yield* Effect.exit(manager.automationEvaluate("tab_1", { expression }));
+
+          expect(Exit.isFailure(exit)).toBe(true);
+          if (Exit.isSuccess(exit)) return;
+          const error = Option.getOrThrow(Cause.findErrorOption(exit.cause));
+          expect(error).toMatchObject({
+            _tag: "PreviewOperationError",
+            operation: "automationEvaluate.encodeResult",
+          });
+          const cause = (error as { readonly cause?: unknown }).cause;
+          expect(String(cause)).toContain(result.type);
+          if ("unserializableValue" in result) {
+            expect(String(cause)).toContain(result.unserializableValue);
+          }
+        }),
+      ),
+    );
+  }
 });
 
 describe("PreviewOperationError", () => {
