@@ -249,15 +249,31 @@ interface CdpEvaluationResult {
 }
 
 /**
+ * A handle's `description` is the only part of this cause the page controls, and
+ * the cause becomes the timeline entry a later `preview_snapshot` hands the
+ * agent, so it is bounded here rather than downstream. CDP puts a whole error
+ * message and stack in it for a `subtype: "error"` handle, which is page state
+ * nobody asked to read.
+ */
+const MAX_HANDLE_DESCRIPTION_CHARS = 160;
+
+const boundedHandleDescription = (description: string): string =>
+  description.length <= MAX_HANDLE_DESCRIPTION_CHARS
+    ? description
+    : `${description.slice(0, MAX_HANDLE_DESCRIPTION_CHARS)} …(+${description.length - MAX_HANDLE_DESCRIPTION_CHARS} chars)`;
+
+/**
  * CDP sends no `value` for a result JSON cannot carry: `1n`, `NaN`, `Infinity`
  * and `-0` arrive as `unserializableValue`, a symbol or a function arrives as
- * its type alone, and an object that stays in the page arrives as a remote
- * handle carrying only metadata — the shape of every `returnByValue: false`
- * result and of an object CDP could not serialize. Reading `value` alone would
- * answer `null` for all of them, so evaluate fails instead and names what the
- * page returned; the `objectId` is a page-side pointer, never a value, so it is
- * left out. A result that is genuinely `undefined`, and CDP's `subtype: "null"`
- * null, have no value to miss and still answer `null`.
+ * its type alone, and a non-null object that stays in the page arrives as a
+ * remote handle carrying only metadata — the shape a `returnByValue: false`
+ * call gets back for such an object, and the shape of an object CDP could not
+ * serialize. Primitives are unaffected: a number, string or boolean still
+ * arrives as its `value` whichever flag was requested. Reading `value` alone
+ * would answer `null` for every handle, so evaluate fails instead and names
+ * what the page returned; the `objectId` is a page-side pointer, never a value,
+ * so it is left out. A result that is genuinely `undefined`, and CDP's
+ * `subtype: "null"` null, have no value to miss and still answer `null`.
  */
 const unserializableEvaluationResult = (result: CdpRemoteObject | undefined): string | null => {
   if (result === undefined || result.value !== undefined) return null;
@@ -271,7 +287,9 @@ const unserializableEvaluationResult = (result: CdpRemoteObject | undefined): st
   const metadata = [
     result.subtype === undefined ? undefined : `subtype ${result.subtype}`,
     result.className === undefined ? undefined : `class ${result.className}`,
-    result.description === undefined ? undefined : `description ${result.description}`,
+    result.description === undefined
+      ? undefined
+      : `description ${boundedHandleDescription(result.description)}`,
   ].filter((field): field is string => field !== undefined);
   return metadata.length === 0 ? result.type : `${result.type} (${metadata.join(", ")})`;
 };
