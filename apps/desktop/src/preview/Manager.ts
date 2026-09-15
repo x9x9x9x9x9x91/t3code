@@ -133,6 +133,15 @@ const AGENT_CURSOR_CLICK_LEAD_MS = 40;
 const requestRecordingCaptureExpression = (tabId: string): string =>
   `globalThis[${JSON.stringify(DESKTOP_PREVIEW_RECORDING_CAPTURE_TRIGGER)}]?.(${JSON.stringify(tabId)}) === true`;
 const encodeUnknownJson = Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
+
+/**
+ * `JSON.stringify` produces no output for `undefined`, a function, or a symbol,
+ * so the JSON encoder fails the whole evaluation instead of serializing one.
+ * An expression such as `(() => {})()` returns exactly that, so those results
+ * become `null` here and the agent receives a value rather than an encode error.
+ */
+export const jsonSerializableEvaluationResult = (value: unknown): unknown =>
+  value === undefined || typeof value === "function" || typeof value === "symbol" ? null : value;
 const DEFAULT_ANNOTATION_THEME: DesktopPreviewAnnotationTheme = {
   colorScheme: "light",
   radius: "0.625rem",
@@ -3990,9 +3999,10 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         input.returnByValue ?? true,
         input.awaitPromise ?? true,
       );
+      const result = jsonSerializableEvaluationResult(value);
       const serialized = yield* encodeJson(
         { operation: "automationEvaluate.encodeResult", tabId },
-        value,
+        result,
       );
       const actualBytes = Buffer.byteLength(serialized, "utf8");
       if (actualBytes > MAX_EVALUATION_BYTES) {
@@ -4002,7 +4012,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           maximumBytes: MAX_EVALUATION_BYTES,
         });
       }
-      return value;
+      return result;
     },
   );
 
