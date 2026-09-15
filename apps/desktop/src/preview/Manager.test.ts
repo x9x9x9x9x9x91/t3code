@@ -4458,24 +4458,22 @@ describe("Preview automation diagnostics", () => {
   });
 });
 
+const encodeJsonResult = Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
+
 describe("jsonSerializableEvaluationResult", () => {
-  const encode = (value: unknown) =>
-    Effect.runSyncExit(
-      Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(value as never),
-    );
+  effectIt.effect("replaces every result the encoder rejects with null", () =>
+    Effect.gen(function* () {
+      for (const value of [undefined, () => 1, Symbol("marker")]) {
+        const rejected = yield* Effect.exit(encodeJsonResult(value as never));
+        expect(Exit.isFailure(rejected)).toBe(true);
 
-  it.each([
-    ["undefined", undefined],
-    ["a function", () => 1],
-    ["a symbol", Symbol("marker")],
-  ])("replaces %s, which the result encoder rejects, with null", (_label, value) => {
-    expect(Exit.isFailure(encode(value))).toBe(true);
+        const normalized = PreviewManager.jsonSerializableEvaluationResult(value);
 
-    const normalized = PreviewManager.jsonSerializableEvaluationResult(value);
-
-    expect(normalized).toBeNull();
-    expect(encode(normalized)).toStrictEqual(Exit.succeed("null"));
-  });
+        expect(normalized).toBeNull();
+        expect(yield* encodeJsonResult(normalized as never)).toBe("null");
+      }
+    }),
+  );
 
   it("passes through every result the encoder already accepts", () => {
     for (const value of [null, 0, false, "", { width: 390, height: 844 }, [1, 2, 3]]) {
