@@ -26,29 +26,69 @@ export function remainingHostBudgetMs(deadlineMs: number): number {
   return Math.max(0, deadlineMs - Date.now());
 }
 
+/** How long a probe that has not answered yet keeps the loop waiting. */
+const HOST_POLL_INTERVAL_MS = 50;
+
+/** What a probe returns when the request deadline arrived before the probe did. */
+const HOST_DEADLINE_EXPIRED = Symbol("previewAutomationHostDeadlineExpired");
+
+/**
+ * Bounds one probe by the request's host deadline.
+ *
+ * A guest that stopped answering leaves its probe pending forever, so without
+ * this race the host outlives the broker timeout and the agent gets the
+ * broker's generic "timed out" instead of the host error that names the wait.
+ */
+async function raceHostDeadline<T>(
+  deadlineMs: number,
+  probe: () => Promise<T>,
+): Promise<T | typeof HOST_DEADLINE_EXPIRED> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      probe(),
+      new Promise<typeof HOST_DEADLINE_EXPIRED>((resolve) => {
+        timeout = setTimeout(
+          () => resolve(HOST_DEADLINE_EXPIRED),
+          remainingHostBudgetMs(deadlineMs),
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * Polls until the probe answers with a value or the host deadline passes.
+ *
+ * Both the probes and the delays between them spend the same deadline, and an
+ * exhausted budget starts no further probe. `null` means the deadline won; the
+ * caller owns the host error that says which wait ran out.
+ */
+export async function pollUntilHostDeadline<T>(
+  deadlineMs: number,
+  probe: () => Promise<T | null>,
+): Promise<T | null> {
+  while (Date.now() < deadlineMs) {
+    const result = await raceHostDeadline(deadlineMs, probe);
+    if (result === HOST_DEADLINE_EXPIRED) return null;
+    if (result !== null) return result;
+    if (Date.now() >= deadlineMs) return null;
+    await new Promise<void>((resolve) =>
+      setTimeout(resolve, Math.min(HOST_POLL_INTERVAL_MS, deadlineMs - Date.now())),
+    );
+  }
+  return null;
+}
+
 /** Both readiness probes and polling delays share the request's host deadline. */
 export async function waitForHostReadiness(
   deadlineMs: number,
   isReady: () => Promise<boolean>,
 ): Promise<boolean> {
-  while (Date.now() < deadlineMs) {
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    let ready: boolean | null;
-    try {
-      ready = await Promise.race([
-        isReady(),
-        new Promise<null>((resolve) => {
-          timeout = setTimeout(() => resolve(null), Math.max(0, deadlineMs - Date.now()));
-        }),
-      ]);
-    } finally {
-      clearTimeout(timeout);
-    }
-    if (ready) return true;
-    if (ready === null || Date.now() >= deadlineMs) return false;
-    await new Promise<void>((resolve) =>
-      setTimeout(resolve, Math.min(50, deadlineMs - Date.now())),
-    );
-  }
-  return false;
+  const ready = await pollUntilHostDeadline(deadlineMs, async () =>
+    (await isReady()) ? true : null,
+  );
+  return ready === true;
 }
