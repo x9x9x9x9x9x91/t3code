@@ -3,10 +3,12 @@ import { expect, it } from "@effect/vitest";
 import {
   EnvironmentId,
   PreviewAutomationClientDisconnectedError,
+  PreviewAutomationExecutionError,
   PreviewAutomationInvalidSelectorError,
   PreviewAutomationMalformedResponseError,
   PreviewAutomationNoAvailableHostError,
   PreviewAutomationTargetNotEditableError,
+  PreviewAutomationTimeoutError,
   PreviewTabId,
   ProviderInstanceId,
   ThreadId,
@@ -469,6 +471,93 @@ it.effect.each([
     }),
   ),
 );
+
+it.effect("names the host class behind a generic remote failure", () => {
+  const remoteMessage = "Preview viewport for request preview-0 on tab-1 secret-host-detail.";
+  const remoteError = {
+    _tag: "PreviewAutomationTimeoutError",
+    hostTag: "PreviewAutomationViewportTimeoutError",
+    message: remoteMessage,
+  } as const;
+
+  return Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* makeBroker;
+      const requests = requestsFrom(
+        yield* broker.connect(makeHost({ supportedOperations: ["resize"] })),
+      );
+      yield* Stream.runForEach(requests, (request) =>
+        broker.respond({
+          clientId: "client-1",
+          connectionId: request.connectionId,
+          requestId: request.requestId,
+          ok: false,
+          error: remoteError,
+        }),
+      ).pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+
+      const error = yield* broker
+        .invoke<void>({
+          scope,
+          operation: "resize",
+          input: { width: 390 },
+          tabId: PreviewTabId.make("tab-1"),
+          timeoutMs: 15_000,
+        })
+        .pipe(Effect.flip);
+
+      expect(error).toBeInstanceOf(PreviewAutomationTimeoutError);
+      expect(error).toMatchObject({ remoteTag: "PreviewAutomationViewportTimeoutError" });
+      // A host wait that ran out reads the same as an unanswered request
+      // without this, which is why resize failures were undiagnosable.
+      expect(error.message).toBe(
+        "Preview automation resize timed out after 15000ms (PreviewAutomationViewportTimeoutError).",
+      );
+      expect(error.message).not.toContain("secret-host-detail");
+    }),
+  );
+});
+
+it.effect("names the host class behind an opaque execution failure", () => {
+  const remoteError = {
+    _tag: "PreviewAutomationExecutionError",
+    hostTag: "PreviewAutomationOperationError",
+    message: "renderer detail",
+  } as const;
+
+  return Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* makeBroker;
+      const requests = requestsFrom(yield* broker.connect(makeHost()));
+      yield* Stream.runForEach(requests, (request) =>
+        broker.respond({
+          clientId: "client-1",
+          connectionId: request.connectionId,
+          requestId: request.requestId,
+          ok: false,
+          error: remoteError,
+        }),
+      ).pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+
+      const error = yield* broker
+        .invoke<void>({
+          scope,
+          operation: "evaluate",
+          input: { expression: "document.title" },
+          tabId: PreviewTabId.make("tab-1"),
+        })
+        .pipe(Effect.flip);
+
+      expect(error).toBeInstanceOf(PreviewAutomationExecutionError);
+      expect(error.message).toBe(
+        "Preview automation evaluate failed on client client-1 (PreviewAutomationOperationError).",
+      );
+      expect(error.message).not.toContain("renderer detail");
+    }),
+  );
+});
 
 it.effect("distinguishes malformed remote failures", () =>
   Effect.scoped(

@@ -25,6 +25,7 @@ const threadId = ThreadId.make("thread-mcp-test");
 const tabId = PreviewTabId.make("tab-mcp-test");
 const alternateTabId = PreviewTabId.make("tab-mcp-alternate");
 const decodeJsonText = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
+const encodeJsonText = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const invocation = {
   environmentId,
   threadId,
@@ -290,6 +291,63 @@ it.effect.each([
       ]);
       expect(nextDefault.structuredContent).toEqual({ ...page, title: "Snapshot 7", screenshot });
       expect(requests).toBe(7);
+    }),
+  ).pipe(Effect.provide(TestLayer)),
+);
+
+it.effect("returns every evaluated shape as a structured record", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const server = yield* McpServer.McpServer;
+      const broker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
+      // The shapes a render check actually produces: a measured object, a list
+      // of offending rules, a count, a joined string, and an expression that
+      // returns nothing.
+      const remoteResults = [
+        { width: 390, height: 844 },
+        [["", ".tasks-sort button.active", ["background: red;"]]],
+        3,
+        "390 844",
+        undefined,
+      ];
+      let served = 0;
+      const events = yield* broker.connect({ clientId: "mcp-evaluate-client", environmentId });
+      // Each evaluate is followed by a status lookup for the tool icon; a
+      // page without a URL keeps the icon out of the asserted shape.
+      yield* Stream.runForEach(events, (event) =>
+        event.type === "connected"
+          ? Effect.void
+          : broker.respond({
+              clientId: "mcp-evaluate-client",
+              connectionId: event.connectionId,
+              requestId: event.request.requestId,
+              ok: true,
+              result:
+                event.request.operation === "evaluate"
+                  ? remoteResults[served++]
+                  : { available: true, tabId: null, url: null, title: null },
+            }),
+      ).pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+
+      for (const remoteResult of remoteResults) {
+        const result = yield* server
+          .callTool({
+            name: "preview_evaluate",
+            arguments: { expression: "(() => remoteResult)()" },
+          })
+          .pipe(
+            Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
+            Effect.provideService(McpSchema.McpServerClient, client),
+          );
+        expect(result.isError).toBe(false);
+        // MCP rejects the whole tool result when structuredContent is not an
+        // object, so an array or an absent value has to arrive wrapped.
+        expect(result.structuredContent).toEqual({ value: remoteResult ?? null });
+        expect(result.content).toEqual([
+          { type: "text", text: encodeJsonText({ value: remoteResult ?? null }) },
+        ]);
+      }
     }),
   ).pipe(Effect.provide(TestLayer)),
 );

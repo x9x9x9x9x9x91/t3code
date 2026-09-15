@@ -444,6 +444,21 @@ export const PreviewAutomationEvaluateInput = Schema.Struct({
 });
 export type PreviewAutomationEvaluateInput = typeof PreviewAutomationEvaluateInput.Type;
 
+/**
+ * Envelope for an evaluated expression's value.
+ *
+ * MCP requires `structuredContent` to be a JSON object, so an expression that
+ * returns an array, `null`, or nothing at all cannot be handed back raw: the
+ * client rejects the whole tool result as malformed and the agent never learns
+ * what its expression produced.
+ */
+export const PreviewAutomationEvaluateResult = Schema.Struct({
+  value: Schema.Unknown.annotateKey({
+    description: "The expression's value, or null when it produced none.",
+  }),
+}).annotate({ description: "The evaluated expression's value." });
+export type PreviewAutomationEvaluateResult = typeof PreviewAutomationEvaluateResult.Type;
+
 export const PreviewAutomationWaitForInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
   selector: Schema.optional(LegacySelector).annotate({
@@ -626,6 +641,10 @@ export const PreviewAutomationResponse = Schema.Struct({
   error: Schema.optional(
     Schema.Struct({
       _tag: TrimmedNonEmptyString,
+      // The host classifies its own error into one of the broker's tags. Keep
+      // the class that actually fired: without it every unmapped host failure
+      // reaches the agent as the same catch-all sentence.
+      hostTag: Schema.optional(TrimmedNonEmptyString),
       message: Schema.String,
       detail: Schema.optional(Schema.Unknown),
     }),
@@ -700,6 +719,16 @@ const PreviewAutomationOptionalRemoteDiagnosticFields = {
   cause: Schema.optional(Schema.Defect()),
 };
 
+/**
+ * Names the remote class behind a generic failure.
+ *
+ * The broker's own tags are coarse on purpose, so "timed out" alone cannot say
+ * whether the overlay, the navigation, or the viewport wait ran out. The tag is
+ * a fixed identifier from our own code, never remote message text.
+ */
+const remoteTagSuffix = (remoteTag: string | undefined, ownTag: string): string =>
+  remoteTag === undefined || remoteTag === ownTag ? "" : ` (${remoteTag})`;
+
 export class PreviewAutomationNoAvailableHostError extends Schema.TaggedError<PreviewAutomationNoAvailableHostError>()(
   "PreviewAutomationNoAvailableHostError",
   {
@@ -753,8 +782,8 @@ export class PreviewAutomationTimeoutError extends Schema.TaggedError<PreviewAut
   },
 ) {
   override get message(): string {
-    const summary = `Preview automation ${this.operation} timed out after ${this.timeoutMs}ms.`;
-    return summary;
+    const summary = `Preview automation ${this.operation} timed out after ${this.timeoutMs}ms`;
+    return `${summary}${remoteTagSuffix(this.remoteTag, "PreviewAutomationTimeoutError")}.`;
   }
 }
 
@@ -778,7 +807,8 @@ export class PreviewAutomationExecutionError extends Schema.TaggedError<PreviewA
   },
 ) {
   override get message(): string {
-    return `Preview automation ${this.operation} failed on client ${this.clientId}.`;
+    const summary = `Preview automation ${this.operation} failed on client ${this.clientId}`;
+    return `${summary}${remoteTagSuffix(this.remoteTag, "PreviewAutomationExecutionError")}.`;
   }
 }
 

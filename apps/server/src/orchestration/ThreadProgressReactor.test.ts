@@ -429,7 +429,7 @@ describe("ThreadProgressReactor", () => {
               }),
             ),
           ),
-          generate: () =>
+          generate: (): ReturnType<NonNullable<HarnessOptions["generate"]>> =>
             Effect.gen(function* () {
               const active = yield* Ref.updateAndGet(inFlight, (count) => count + 1);
               yield* Ref.update(peak, (count) => Math.max(count, active));

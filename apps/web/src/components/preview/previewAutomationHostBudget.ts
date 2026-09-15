@@ -14,6 +14,18 @@ export function resolveHostWaitBudgetMs(requestTimeoutMs: number): number {
   return Math.max(0, requestTimeoutMs - reservedMs);
 }
 
+/**
+ * What is left of the request's host budget.
+ *
+ * Every wait inside one request shares the deadline the budget set, so a later
+ * wait cannot restart the clock: the broker fails the request at its own
+ * timeout, and the agent then sees a generic "timed out" instead of the host
+ * error that names which wait ran out.
+ */
+export function remainingHostBudgetMs(deadlineMs: number): number {
+  return Math.max(0, deadlineMs - Date.now());
+}
+
 /** Both readiness probes and polling delays share the request's host deadline. */
 export async function waitForHostReadiness(
   deadlineMs: number,

@@ -237,6 +237,7 @@ export function serializePreviewAutomationHostError(
   );
   return {
     _tag: "responseTag" in error ? error.responseTag : error._tag,
+    hostTag: error._tag,
     message: error.message,
     ...(Object.keys(detail).length === 0 ? {} : { detail }),
   };
