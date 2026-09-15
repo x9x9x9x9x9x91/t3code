@@ -4540,6 +4540,75 @@ describe("PreviewManager", () => {
       ),
     );
   }
+
+  // A `{ subtype: "error" }` handle carries the page's whole message and stack
+  // in `description`, and the cause becomes the timeline entry a later snapshot
+  // hands the agent — so only a bounded head of the description is kept.
+  effectIt.effect("bounds a long handle description before the timeline records it", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const payloadMarker = "SYNTHETIC_PRIVATE_PAGE_STATE";
+        const description = `Error: the page action failed${"x".repeat(262_144)}${payloadMarker}`;
+        const capturePage = vi.fn(async () => ({
+          toPNG: () => Buffer.from("timeline-png"),
+          toJPEG: () => Buffer.from("unused-capture"),
+          getSize: () => ({ width: 100, height: 80 }),
+        }));
+        const wc = makeTestPreviewWebContents(capturePage);
+        Object.assign(wc, { isDevToolsOpened: () => false });
+        Object.assign(wc.debugger, {
+          sendCommand: vi.fn(async (method: string, params?: Record<string, unknown>) => {
+            if (method === "Accessibility.getFullAXTree") return { nodes: [] };
+            if (method !== "Runtime.evaluate") return undefined;
+            return params?.["expression"] === "window.runAction()"
+              ? {
+                  result: {
+                    type: "object",
+                    subtype: "error",
+                    className: "Error",
+                    description,
+                    objectId: "obj-private",
+                  },
+                }
+              : {
+                  result: {
+                    value: {
+                      url: "https://example.com",
+                      title: "Example",
+                      loading: false,
+                      visibleText: "Public page",
+                      interactiveElements: [],
+                    },
+                  },
+                };
+          }),
+        });
+        fromId.mockReturnValue(wc);
+        yield* manager.createTab("tab_1");
+        yield* manager.registerWebview("tab_1", 42);
+
+        const exit = yield* Effect.exit(
+          manager.automationEvaluate("tab_1", {
+            expression: "window.runAction()",
+            returnByValue: false,
+          }),
+        );
+        expect(Exit.isFailure(exit)).toBe(true);
+
+        const snapshot = yield* manager.automationSnapshot("tab_1");
+        const evaluated = snapshot.actionTimeline.find(({ action }) => action === "evaluate");
+        expect(evaluated).toMatchObject({ status: "failed" });
+        const timelineError = evaluated?.error ?? "";
+        expect(timelineError.length).toBeLessThan(400);
+        expect(timelineError).not.toContain(payloadMarker);
+        // What identifies the value survives; the rest is counted, not carried.
+        expect(timelineError).toContain("subtype error");
+        expect(timelineError).toContain("class Error");
+        expect(timelineError).toContain(`…(+${description.length - 160} chars)`);
+        expect(timelineError).not.toContain("obj-private");
+      }),
+    ),
+  );
 });
 
 describe("PreviewOperationError", () => {
@@ -4553,6 +4622,19 @@ describe("PreviewOperationError", () => {
     });
 
     expect(error.message).not.toContain(cause.message);
+    expect(PreviewManager.PreviewOperationError.toTimelineMessage(error)).toBe(cause.message);
+  });
+
+  // Nothing between this serializer and the agent trims the message, so what the
+  // cause carries is what a later snapshot's timeline entry carries.
+  it("hands the cause message to the timeline verbatim", () => {
+    const cause = new Error(`Evaluation result has no JSON form: object ${"x".repeat(4_096)}`);
+    const error = new PreviewManager.PreviewOperationError({
+      operation: "automationEvaluate.encodeResult",
+      tabId: "tab_1",
+      cause,
+    });
+
     expect(PreviewManager.PreviewOperationError.toTimelineMessage(error)).toBe(cause.message);
   });
 });

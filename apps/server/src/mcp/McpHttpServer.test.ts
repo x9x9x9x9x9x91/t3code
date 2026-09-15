@@ -295,6 +295,79 @@ it.effect.each([
   ).pipe(Effect.provide(TestLayer)),
 );
 
+// The manager bounds a remote handle's `description` where it builds the cause
+// (`unserializableEvaluationResult` in `apps/desktop/src/preview/Manager.ts`),
+// because nothing downstream does: this checks that what the manager records in
+// the timeline is what the agent reads, verbatim, so the bound is the whole
+// protection. Its manager-side half is "bounds a long handle description before
+// the timeline records it" in `apps/desktop/src/preview/Manager.test.ts`.
+it.effect("hands a bounded handle description to the agent verbatim", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const server = yield* McpServer.McpServer;
+      const broker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
+      const connected = yield* Deferred.make<void>();
+      const payloadMarker = "SYNTHETIC_PRIVATE_PAGE_STATE";
+      const description = `Error: the page action failed${"x".repeat(262_144)}${payloadMarker}`;
+      const timelineError = `Evaluation result has no JSON form: object (subtype error, class Error, description ${description.slice(0, 160)} …(+${description.length - 160} chars))`;
+      const snapshotResult = {
+        url: "http://example.test/",
+        title: "Public page",
+        loading: false,
+        visibleText: "Public page",
+        interactiveElements: [],
+        accessibilityTree: { role: "document", name: "Example" },
+        consoleEntries: [],
+        networkEntries: [],
+        actionTimeline: [
+          {
+            id: "browser-action-1",
+            action: "evaluate",
+            status: "failed" as const,
+            startedAt: "2026-09-15T00:00:00.000Z",
+            completedAt: "2026-09-15T00:00:01.000Z",
+            error: timelineError,
+          },
+        ],
+        screenshot: { mimeType: "image/png" as const, data: "", width: 1, height: 1 },
+      };
+      const events = yield* broker.connect({ clientId: "mcp-timeline-client", environmentId });
+      yield* Stream.runForEach(events, (event) =>
+        event.type === "connected"
+          ? Deferred.succeed(connected, undefined)
+          : broker.respond({
+              clientId: "mcp-timeline-client",
+              connectionId: event.connectionId,
+              requestId: event.request.requestId,
+              ok: true,
+              result: snapshotResult,
+            }),
+      ).pipe(Effect.forkScoped);
+      yield* Deferred.await(connected);
+
+      const snapshot = yield* server
+        .callTool({ name: "preview_snapshot", arguments: { includeImage: false } })
+        .pipe(
+          Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
+          Effect.provideService(McpSchema.McpServerClient, client),
+        );
+
+      expect(snapshot.isError).toBe(false);
+      const text = snapshot.content
+        .map((content) => (content.type === "text" ? content.text : ""))
+        .join("");
+      // Nothing between the manager and the agent trims this, which is why the
+      // bound has to be at the source.
+      expect(snapshot.structuredContent).toMatchObject({
+        actionTimeline: [{ error: timelineError }],
+      });
+      expect(text).toContain(`…(+${description.length - 160} chars)`);
+      expect(text).not.toContain(payloadMarker);
+      expect(text.length).toBeLessThan(2_000);
+    }),
+  ).pipe(Effect.provide(TestLayer)),
+);
+
 it.effect("returns every evaluated shape as a structured record", () =>
   Effect.scoped(
     Effect.gen(function* () {

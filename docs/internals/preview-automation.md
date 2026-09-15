@@ -7,12 +7,16 @@ working: script execution needs no composited frame. `preview_snapshot` is the
 one that fails there, and why is still open.
 
 CDP answers a result JSON cannot carry — `1n`, `NaN`, `Infinity`, `-0`, a symbol
-— with `unserializableValue` or a bare type and no `value`, and an object that
-stays in the page with a remote handle that has no `value` either, which is also
-what every `returnByValue: false` call gets back. `preview_evaluate` fails all of
-those instead of reading the missing `value` and reporting a successful `null`;
-only an expression that genuinely returns `undefined`, or `null` itself, answers
-`null`.
+— with `unserializableValue` or a bare type and no `value`, and a non-null object
+that stays in the page with a remote handle that has no `value` either, which is
+what a `returnByValue: false` call gets back for such an object. A primitive is
+not a handle: a number, string or boolean still arrives as its `value` under
+either flag. `preview_evaluate` fails every handle instead of reading the missing
+`value` and reporting a successful `null`; only an expression that genuinely
+returns `undefined`, or `null` itself, answers `null`. The failure names the
+handle's type, subtype and class, and at most 160 characters of CDP's
+`description` — it is the page's own error message and stack, and that cause
+becomes the action-timeline entry a later `preview_snapshot` returns.
 
 `preview_resize` resizes the host view and waits for the renderer to report the
 new viewport. That wait is bounded by the request's host deadline, so a renderer
