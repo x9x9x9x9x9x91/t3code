@@ -80,7 +80,11 @@ import {
   resolvePreviewAutomationOpenTab,
   resolvePreviewAutomationTarget,
 } from "./previewAutomationTarget";
-import { resolveHostWaitBudgetMs, waitForHostReadiness } from "./previewAutomationHostBudget";
+import {
+  remainingHostBudgetMs,
+  resolveHostWaitBudgetMs,
+  waitForHostReadiness,
+} from "./previewAutomationHostBudget";
 import { isPreviewViewportReady } from "./previewViewportReadiness";
 import { shouldRollbackPreviewViewport } from "./previewViewportRollback";
 
@@ -527,7 +531,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
                 activeRuntimeTabId,
                 request.operation,
                 "load",
-                request.timeoutMs,
+                remainingHostBudgetMs(hostDeadlineMs),
               );
             }
             return await currentStatus(threadRef, activeTabId);
@@ -550,7 +554,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
               ready.runtimeTabId,
               request.operation,
               input.readiness ?? "load",
-              input.timeoutMs ?? request.timeoutMs,
+              remainingHostBudgetMs(hostDeadlineMs),
             );
             return await currentStatus(threadRef, ready.tabId);
           }
@@ -591,7 +595,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
                 ready.tabId,
                 ready.runtimeTabId,
                 setting,
-                input.timeoutMs ?? request.timeoutMs,
+                remainingHostBudgetMs(hostDeadlineMs),
                 {
                   requestId: request.requestId,
                   operation: request.operation,

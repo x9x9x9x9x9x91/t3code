@@ -200,6 +200,38 @@ describe("PreviewAutomationError", () => {
       expect(error.message).toBe("Preview automation type requires an editable focused element.");
     }
   });
+
+  it("names the remote class behind a coarse timeout without quoting it", () => {
+    const hostTimeout = {
+      _tag: "PreviewAutomationTimeoutError",
+      operation: "resize",
+      environmentId: "environment-1",
+      threadId: "thread-1",
+      providerSessionId: "provider-session-1",
+      providerInstanceId: "codex",
+      clientId: "client-1",
+      connectionId: "connection-1",
+      requestId: "request-1",
+      tabId: "tab-1",
+      timeoutMs: 15_000,
+    } as const;
+
+    // Several host waits share this one tag, so without the remote class an
+    // unrendered viewport reads exactly like an unanswered request.
+    expect(
+      decodeAutomationError({
+        ...hostTimeout,
+        remoteTag: "PreviewAutomationViewportTimeoutError",
+        remoteMessageLength: 120,
+        cause: {},
+      }).message,
+    ).toBe(
+      "Preview automation resize timed out after 15000ms (PreviewAutomationViewportTimeoutError).",
+    );
+    expect(decodeAutomationError(hostTimeout).message).toBe(
+      "Preview automation resize timed out after 15000ms.",
+    );
+  });
 });
 
 describe("PreviewAutomationStatus", () => {

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 
 import {
   PREVIEW_HOST_RESPONSE_MARGIN_MS,
+  remainingHostBudgetMs,
   resolveHostWaitBudgetMs,
   waitForHostReadiness,
 } from "./previewAutomationHostBudget";
@@ -132,5 +133,20 @@ describe("waitForHostReadiness", () => {
 
     await expect(waitForHostReadiness(800, isReady)).rejects.toBe(error);
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe("remainingHostBudgetMs", () => {
+  it("spends one request's deadline across its successive waits", () => {
+    const deadline = Date.now() + resolveHostWaitBudgetMs(15_000);
+    const beforeReadiness = remainingHostBudgetMs(deadline);
+    // A wait that restarted the clock at the request timeout would always
+    // outlive the broker, which then reports its own generic timeout instead.
+    expect(beforeReadiness).toBeLessThan(15_000);
+    expect(remainingHostBudgetMs(deadline - 5_000)).toBeLessThan(beforeReadiness);
+  });
+
+  it("reports an exhausted budget as zero rather than a negative wait", () => {
+    expect(remainingHostBudgetMs(Date.now() - 10_000)).toBe(0);
   });
 });

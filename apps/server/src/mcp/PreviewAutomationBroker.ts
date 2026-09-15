@@ -188,7 +188,9 @@ const classifyResponseError = (
   error: NonNullable<PreviewAutomationResponse["error"]>,
 ): PreviewAutomationError => {
   const remoteDiagnostics = {
-    remoteTag: error._tag,
+    // The host's own class, when it sent one: the response tag is the coarse
+    // bucket it chose, and several distinct host failures share one bucket.
+    remoteTag: error.hostTag ?? error._tag,
     remoteMessageLength: error.message.length,
     ...(error.detail === undefined ? {} : { remoteDetailKind: remoteDetailKind(error.detail) }),
     cause: error,
