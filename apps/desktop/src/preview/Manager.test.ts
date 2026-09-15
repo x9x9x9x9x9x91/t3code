@@ -4329,6 +4329,32 @@ describe("PreviewManager", () => {
       }),
     ),
   );
+
+  effectIt.effect("answers with null when an expression produces no JSON value", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const capturePage = vi.fn(async () => ({
+          toJPEG: () => Buffer.from("unused-capture"),
+          getSize: () => ({ width: 1280, height: 720 }),
+        }));
+        const wc = makeTestPreviewWebContents(capturePage);
+        Object.assign(wc, { isDevToolsOpened: () => false });
+        // What CDP reports for `(() => {})()`, `void 0`, or a bare assignment.
+        Object.assign(wc.debugger, {
+          sendCommand: vi.fn(async (method: string) =>
+            method === "Runtime.evaluate" ? { result: { type: "undefined" } } : undefined,
+          ),
+        });
+        fromId.mockReturnValue(wc);
+        yield* manager.createTab("tab_1");
+        yield* manager.registerWebview("tab_1", 42);
+
+        expect(
+          yield* manager.automationEvaluate("tab_1", { expression: "(() => {})()" }),
+        ).toBeNull();
+      }),
+    ),
+  );
 });
 
 describe("PreviewOperationError", () => {
@@ -4429,5 +4455,31 @@ describe("Preview automation diagnostics", () => {
     expect(error.message).not.toContain(selector);
     expect(JSON.stringify(error)).not.toContain(selector);
     expect("locator" in error).toBe(false);
+  });
+});
+
+describe("jsonSerializableEvaluationResult", () => {
+  const encode = (value: unknown) =>
+    Effect.runSyncExit(
+      Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(value as never),
+    );
+
+  it.each([
+    ["undefined", undefined],
+    ["a function", () => 1],
+    ["a symbol", Symbol("marker")],
+  ])("replaces %s, which the result encoder rejects, with null", (_label, value) => {
+    expect(Exit.isFailure(encode(value))).toBe(true);
+
+    const normalized = PreviewManager.jsonSerializableEvaluationResult(value);
+
+    expect(normalized).toBeNull();
+    expect(encode(normalized)).toStrictEqual(Exit.succeed("null"));
+  });
+
+  it("passes through every result the encoder already accepts", () => {
+    for (const value of [null, 0, false, "", { width: 390, height: 844 }, [1, 2, 3]]) {
+      expect(PreviewManager.jsonSerializableEvaluationResult(value)).toBe(value);
+    }
   });
 });
