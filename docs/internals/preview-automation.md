@@ -6,6 +6,11 @@ closed the tab still exists and still runs script, so `preview_evaluate` keeps
 working: script execution needs no composited frame. `preview_snapshot` is the
 one that fails there, and why is still open.
 
+CDP answers a result JSON cannot carry — `1n`, `NaN`, `Infinity`, `-0`, a symbol
+— with `unserializableValue` or a bare type and no `value`, so `preview_evaluate`
+fails those instead of reading the missing `value` and reporting a successful
+`null`; only an expression that genuinely returns `undefined` answers `null`.
+
 `preview_resize` resizes the host view and waits for the renderer to report the
 new viewport. That wait is bounded by the request's host deadline, so a renderer
 that never reports costs the wait rather than the whole request, and the agent
