@@ -87,6 +87,7 @@ import {
   resolvePreviewAutomationTarget,
 } from "./previewAutomationTarget";
 import {
+  pollUntilHostDeadline,
   remainingHostBudgetMs,
   resolveHostWaitBudgetMs,
   waitForHostReadiness,
@@ -196,31 +197,29 @@ const waitForRenderedViewport = async (
     readonly threadId: PreviewAutomationRequest["threadId"];
   },
 ): Promise<PreviewRenderedViewportSize> => {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() <= deadline) {
+  const viewport = await pollUntilHostDeadline(Date.now() + timeoutMs, async () => {
     assertPreviewRuntimeCurrent(threadRef, tabId, runtimeTabId, context);
     try {
       const webview = findPreviewWebview(runtimeTabId);
       const appliedSettingKey = webview?.getAttribute("data-preview-viewport-key") ?? null;
       const declaredViewport = readDeclaredViewport(webview);
       const renderedViewport = webview ? await readWebviewViewport(webview) : null;
-      if (
-        renderedViewport &&
+      return renderedViewport &&
         isPreviewViewportReady({
           setting,
           appliedSettingKey,
           declaredViewport,
           renderedViewport,
         })
-      ) {
-        return renderedViewport;
-      }
+        ? renderedViewport
+        : null;
     } catch {
       // Registration and navigation can transiently replace the guest while
       // React applies the server snapshot. Retry until the operation deadline.
+      return null;
     }
-    await new Promise<void>((resolve) => window.setTimeout(resolve, 50));
-  }
+  });
+  if (viewport) return viewport;
   throw new PreviewAutomationViewportTimeoutError({
     ...context,
     tabId,
@@ -614,7 +613,10 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
                 },
               );
             } catch (cause) {
-              await runBrowserViewportMutation(ready.runtimeTabId, async () => {
+              // The viewport queue keeps this rollback ordered behind any newer
+              // resize, so it runs without the caller waiting: the host error
+              // has to reach the broker before the broker's own timeout does.
+              void runBrowserViewportMutation(ready.runtimeTabId, async () => {
                 const latestState = readThreadPreviewState(threadRef);
                 const latestSetting =
                   latestState.sessions[ready.tabId]?.viewport ?? FILL_PREVIEW_VIEWPORT;
@@ -639,6 +641,9 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
                     updatePreviewServerSnapshot(threadRef, rollback.value);
                   }
                 }
+              }).catch(() => {
+                // A failed rollback leaves the server snapshot as the source
+                // of truth; the viewport timeout is what the agent needs.
               });
               throw cause;
             }

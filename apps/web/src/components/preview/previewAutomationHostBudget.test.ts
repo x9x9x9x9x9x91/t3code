@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 
 import {
   PREVIEW_HOST_RESPONSE_MARGIN_MS,
+  pollUntilHostDeadline,
   remainingHostBudgetMs,
   resolveHostWaitBudgetMs,
   waitForHostReadiness,
@@ -132,6 +133,62 @@ describe("waitForHostReadiness", () => {
     const isReady = vi.fn().mockRejectedValue(error);
 
     await expect(waitForHostReadiness(800, isReady)).rejects.toBe(error);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe("pollUntilHostDeadline", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("gives up on a probe that never settles, within the budget", async () => {
+    const probe = vi.fn(() => new Promise<string | null>(() => {}));
+    let finishedAt: number | undefined;
+    const result = pollUntilHostDeadline(80, probe).then((value) => {
+      finishedAt = Date.now();
+      return value;
+    });
+
+    await vi.advanceTimersByTimeAsync(80);
+
+    expect(await result).toBeNull();
+    expect(finishedAt).toBeLessThanOrEqual(80);
+    expect(probe).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("does not start a probe it has no budget left to finish", async () => {
+    const probe = vi.fn(async () => "rendered");
+
+    expect(await pollUntilHostDeadline(Date.now(), probe)).toBeNull();
+    expect(probe).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("returns the first probe result and stops polling", async () => {
+    const probe = vi
+      .fn<() => Promise<string | null>>()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce("rendered");
+    const result = pollUntilHostDeadline(800, probe);
+
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(await result).toBe("rendered");
+    expect(probe).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("propagates a probe failure instead of polling through it", async () => {
+    const error = new Error("Preview target was replaced");
+
+    await expect(pollUntilHostDeadline(800, vi.fn().mockRejectedValue(error))).rejects.toBe(error);
     expect(vi.getTimerCount()).toBe(0);
   });
 });
