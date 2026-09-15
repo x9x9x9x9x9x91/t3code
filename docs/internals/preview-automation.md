@@ -7,9 +7,12 @@ working: script execution needs no composited frame. `preview_snapshot` is the
 one that fails there, and why is still open.
 
 CDP answers a result JSON cannot carry — `1n`, `NaN`, `Infinity`, `-0`, a symbol
-— with `unserializableValue` or a bare type and no `value`, so `preview_evaluate`
-fails those instead of reading the missing `value` and reporting a successful
-`null`; only an expression that genuinely returns `undefined` answers `null`.
+— with `unserializableValue` or a bare type and no `value`, and an object that
+stays in the page with a remote handle that has no `value` either, which is also
+what every `returnByValue: false` call gets back. `preview_evaluate` fails all of
+those instead of reading the missing `value` and reporting a successful `null`;
+only an expression that genuinely returns `undefined`, or `null` itself, answers
+`null`.
 
 `preview_resize` resizes the host view and waits for the renderer to report the
 new viewport. That wait is bounded by the request's host deadline, so a renderer

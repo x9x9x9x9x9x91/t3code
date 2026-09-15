@@ -252,6 +252,8 @@ const artifactSiteSlug = (rawUrl: string): string => {
 
 interface CdpRemoteObject {
   readonly type?: string;
+  readonly subtype?: string;
+  readonly className?: string;
   readonly value?: unknown;
   readonly unserializableValue?: string;
   readonly description?: string;
@@ -267,19 +269,30 @@ interface CdpEvaluationResult {
 
 /**
  * CDP sends no `value` for a result JSON cannot carry: `1n`, `NaN`, `Infinity`
- * and `-0` arrive as `unserializableValue`, and a symbol or a function arrives
- * as its type alone. Reading `value` alone would answer `null` for all of them,
- * so evaluate fails instead and names what the page returned. A result that is
- * genuinely `undefined` has neither, and still answers `null`.
+ * and `-0` arrive as `unserializableValue`, a symbol or a function arrives as
+ * its type alone, and an object that stays in the page arrives as a remote
+ * handle carrying only metadata — the shape of every `returnByValue: false`
+ * result and of an object CDP could not serialize. Reading `value` alone would
+ * answer `null` for all of them, so evaluate fails instead and names what the
+ * page returned; the `objectId` is a page-side pointer, never a value, so it is
+ * left out. A result that is genuinely `undefined`, and CDP's `subtype: "null"`
+ * null, have no value to miss and still answer `null`.
  */
 const unserializableEvaluationResult = (result: CdpRemoteObject | undefined): string | null => {
   if (result === undefined || result.value !== undefined) return null;
   if (result.unserializableValue !== undefined) {
     return `${result.type ?? "unknown"} ${result.unserializableValue}`;
   }
-  return result.type === "bigint" || result.type === "symbol" || result.type === "function"
-    ? result.type
-    : null;
+  if (result.type === "bigint" || result.type === "symbol" || result.type === "function") {
+    return result.type;
+  }
+  if (result.type !== "object" || result.subtype === "null") return null;
+  const metadata = [
+    result.subtype === undefined ? undefined : `subtype ${result.subtype}`,
+    result.className === undefined ? undefined : `class ${result.className}`,
+    result.description === undefined ? undefined : `description ${result.description}`,
+  ].filter((field): field is string => field !== undefined);
+  return metadata.length === 0 ? result.type : `${result.type} (${metadata.join(", ")})`;
 };
 
 export const PreviewAutomationSelectorKind = Schema.Literals([
