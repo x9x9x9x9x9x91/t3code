@@ -164,8 +164,13 @@ it.effect.each([{}, { includeImage: false }])(
           );
 
         expect(snapshot.isError).toBe(true);
+        // The class behind the failure has to reach the agent's text: the
+        // structured error is not what an agent reads back.
         expect(snapshot.content).toEqual([
-          { type: "text", text: "Preview snapshot failed: PreviewAutomationExecutionError." },
+          {
+            type: "text",
+            text: "Preview snapshot failed: Preview automation snapshot failed on client mcp-failure-client.",
+          },
         ]);
         expect(snapshot.structuredContent).toEqual({
           error: {

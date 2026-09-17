@@ -13,6 +13,7 @@ import * as Stream from "effect/Stream";
 import type * as Types from "effect/Types";
 import { McpProtocol, McpSchema, McpServer, Tool } from "effect/unstable/ai";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { PreviewAutomationError } from "@t3tools/contracts";
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
@@ -311,6 +312,21 @@ const saveScreenshot = Effect.fn("McpHttpServer.saveScreenshot")(function* (
   return screenshotPath;
 });
 
+const isPreviewAutomationError = Schema.is(PreviewAutomationError);
+
+/**
+ * The text an agent reads has to name the failure, not just the tool.
+ *
+ * Only our own preview failures are quoted in full: every one of them builds
+ * its message from fixed identifiers and its own fields, so nothing a remote
+ * host wrote reaches the agent this way. Anything else, a schema rejection
+ * for instance, is named by its tag alone.
+ */
+const previewSnapshotFailureText = (failure: unknown, errorTag: string): string => {
+  if (!isPreviewAutomationError(failure)) return `Preview snapshot failed: ${errorTag}.`;
+  const { message } = failure;
+  return `Preview snapshot failed: ${message.endsWith(".") ? message : `${message}.`}`;
+};
 const previewSnapshotFailure = <E>(cause: Cause.Cause<E>) => {
   if (Cause.hasInterrupts(cause) || cause.reasons.some(Cause.isDieReason)) {
     return Effect.failCause(cause).pipe(Effect.orDie);
@@ -333,8 +349,8 @@ const previewSnapshotFailure = <E>(cause: Cause.Cause<E>) => {
         failureCount: failures.length,
       },
     },
-    // Agents usually see only the text content, so name the tag there too.
-    content: [{ type: "text", text: `Preview snapshot failed: ${errorTag}.` }],
+    // Agents usually see only the text content, so name the failure there too.
+    content: [{ type: "text", text: previewSnapshotFailureText(firstFailure, errorTag) }],
   });
   return Effect.logWarning("preview snapshot failed", {
     operation: "snapshot",
