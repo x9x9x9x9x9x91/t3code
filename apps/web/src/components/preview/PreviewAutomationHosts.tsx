@@ -588,7 +588,9 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
                 url: input.url!,
               },
             );
-            await ready.bridge.navigate(ready.runtimeTabId, resolution.resolvedUrl);
+            await bounded(ready.tabId, () =>
+              ready.bridge.navigate(ready.runtimeTabId, resolution.resolvedUrl),
+            );
             await waitForNavigationReadiness(
               threadRef,
               request.requestId,
