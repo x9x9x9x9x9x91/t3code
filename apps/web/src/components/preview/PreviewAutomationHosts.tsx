@@ -565,8 +565,11 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
               await waitForPreviewPresentation(activeRuntimeTabId);
             }
             if (reusedExistingTab && resolvedInputUrl && previewBridge) {
+              const bridge = previewBridge;
               assertPreviewRuntimeCurrent(threadRef, activeTabId, activeRuntimeTabId, request);
-              await previewBridge.navigate(activeRuntimeTabId, resolvedInputUrl);
+              await bounded(activeTabId, () =>
+                bridge.navigate(activeRuntimeTabId, resolvedInputUrl),
+              );
               await waitForNavigationReadiness(
                 threadRef,
                 request.requestId,
