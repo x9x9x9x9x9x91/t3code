@@ -43,6 +43,7 @@ const mocks = vi.hoisted(() => ({
   focus: vi.fn(async () => undefined),
   automationStatus: vi.fn<(runtimeTabId: string) => Promise<PreviewAutomationStatus>>(),
   automationSnapshot: vi.fn<(runtimeTabId: string) => Promise<unknown>>(),
+  navigate: vi.fn<(runtimeTabId: string, url: string) => Promise<void>>(),
 }));
 
 vi.mock("~/localApi", () => ({
@@ -70,6 +71,7 @@ vi.mock("~/state/use-atom-query-runner", () => ({
 }));
 vi.mock("./previewBridge", () => ({
   previewBridge: {
+    navigate: mocks.navigate,
     automation: { status: mocks.automationStatus, snapshot: mocks.automationSnapshot },
   },
 }));
@@ -120,12 +122,16 @@ const automationStatus: PreviewAutomationStatus = {
 };
 
 /** A rendering guest is what `waitForDesktopOverlay` probes for before it runs an operation. */
-const renderingWebviewDocument = (runtimeTabId: string) => ({
+const renderingWebviewDocument = (
+  runtimeTabId: string,
+  executeJavaScript?: (code: string) => Promise<unknown>,
+) => ({
   hasFocus: () => false,
   querySelectorAll: () => [
     {
       getAttribute: (name: string) => (name === "data-preview-tab" ? runtimeTabId : null),
       closest: () => ({ getAttribute: () => "active" }),
+      ...(executeJavaScript ? { executeJavaScript } : {}),
     },
   ],
 });
@@ -143,7 +149,32 @@ const requestEvent: PreviewAutomationStreamEvent = {
     timeoutMs: 15_000,
   },
 };
-const snapshotRequestTimeoutMs = 15_000;
+const requestTimeoutMs = 15_000;
+const statusRequestEvent: PreviewAutomationStreamEvent = {
+  type: "request",
+  connectionId: "automation-connection",
+  request: {
+    requestId: "status-request",
+    threadId,
+    operation: "status",
+    tabId: snapshot.tabId,
+    input: {},
+    timeoutMs: requestTimeoutMs,
+  },
+};
+const navigateUrl = "http://example.test/next";
+const navigateRequestEvent: PreviewAutomationStreamEvent = {
+  type: "request",
+  connectionId: "automation-connection",
+  request: {
+    requestId: "navigate-request",
+    threadId,
+    operation: "navigate",
+    tabId: snapshot.tabId,
+    input: { url: navigateUrl },
+    timeoutMs: requestTimeoutMs,
+  },
+};
 const snapshotRequestEvent: PreviewAutomationStreamEvent = {
   type: "request",
   connectionId: "automation-connection",
@@ -153,7 +184,7 @@ const snapshotRequestEvent: PreviewAutomationStreamEvent = {
     operation: "snapshot",
     tabId: snapshot.tabId,
     input: {},
-    timeoutMs: snapshotRequestTimeoutMs,
+    timeoutMs: requestTimeoutMs,
   },
 };
 
@@ -276,14 +307,12 @@ describe("PreviewAutomationHosts snapshot", () => {
         appAtomRegistry.set(requestsAtom, AsyncResult.success(snapshotRequestEvent));
       });
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(snapshotRequestTimeoutMs);
+        await vi.advanceTimersByTimeAsync(requestTimeoutMs);
       });
       // The broker fails the request at request.timeoutMs, so a host answer
       // that arrives later is dropped and the agent never learns the class.
       expect(respondedAt).toBeDefined();
-      expect(respondedAt ?? Number.POSITIVE_INFINITY).toBeLessThan(
-        startedAt + snapshotRequestTimeoutMs,
-      );
+      expect(respondedAt ?? Number.POSITIVE_INFINITY).toBeLessThan(startedAt + requestTimeoutMs);
     } finally {
       vi.useRealTimers();
     }
@@ -298,6 +327,130 @@ describe("PreviewAutomationHosts snapshot", () => {
     });
     expect(mocks.automationSnapshot).toHaveBeenCalledExactlyOnceWith(runtimeTabId);
     expect(mocks.list).not.toHaveBeenCalled();
+    expect(useBrowserSurfaceStore.getState().activityByTabId[runtimeTabId]).toBeUndefined();
+  });
+});
+
+describe("PreviewAutomationHosts status", () => {
+  /** A status request reads the guest directly, so it needs no overlay wait. */
+  const readyStatusTarget = (executeJavaScript?: (code: string) => Promise<unknown>) => {
+    const runtimeTabId = previewRuntimeTabId(threadRef, serverEpoch, snapshot.tabId);
+    reconcilePreviewServerSessions(threadRef, {
+      sessions: [snapshot],
+      serverEpoch,
+      revision: 1,
+    });
+    applyPreviewDesktopState(threadRef, snapshot.tabId, desktopOverlay);
+    vi.stubGlobal("document", renderingWebviewDocument(runtimeTabId, executeJavaScript));
+    return runtimeTabId;
+  };
+
+  const respondToStalledStatus = async () => {
+    const response = deferred<PreviewAutomationResponse>();
+    let respondedAt: number | undefined;
+    mocks.respond.mockImplementationOnce(async ({ input }) => {
+      respondedAt = Date.now();
+      response.resolve(input);
+    });
+
+    vi.useFakeTimers();
+    try {
+      const startedAt = Date.now();
+      await act(async () => {
+        appAtomRegistry.set(requestsAtom, AsyncResult.success(statusRequestEvent));
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(requestTimeoutMs);
+      });
+      // The broker fails the request at request.timeoutMs, so a host answer
+      // that arrives later is dropped and the agent never learns the class.
+      expect(respondedAt).toBeDefined();
+      expect(respondedAt ?? Number.POSITIVE_INFINITY).toBeLessThan(startedAt + requestTimeoutMs);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    await expect(response.promise).resolves.toMatchObject({
+      requestId: "status-request",
+      ok: false,
+      error: {
+        _tag: "PreviewAutomationTimeoutError",
+        hostTag: "PreviewAutomationBridgeTimeoutError",
+      },
+    });
+  };
+
+  it("fails a stalled viewport read on the host deadline instead of answering without a viewport", async () => {
+    const runtimeTabId = readyStatusTarget(() => new Promise<unknown>(() => {}));
+    mocks.automationStatus.mockImplementation(async () => automationStatus);
+
+    await respondToStalledStatus();
+
+    // A page that cannot answer a viewport read cannot report a truthful
+    // status either, so the expiry fails the request instead of quietly
+    // dropping the viewport from it.
+    expect(mocks.automationStatus).not.toHaveBeenCalled();
+    expect(useBrowserSurfaceStore.getState().activityByTabId[runtimeTabId]).toBeUndefined();
+  });
+
+  it("fails a stalled bridge status on the host deadline instead of losing to the broker", async () => {
+    const executeJavaScript = vi.fn(async () => ({ width: 1440, height: 900 }));
+    const runtimeTabId = readyStatusTarget(executeJavaScript);
+    mocks.automationStatus.mockImplementation(() => new Promise<PreviewAutomationStatus>(() => {}));
+
+    await respondToStalledStatus();
+
+    expect(executeJavaScript).toHaveBeenCalledOnce();
+    expect(mocks.automationStatus).toHaveBeenCalledExactlyOnceWith(runtimeTabId);
+    expect(useBrowserSurfaceStore.getState().activityByTabId[runtimeTabId]).toBeUndefined();
+  });
+});
+
+describe("PreviewAutomationHosts navigate", () => {
+  it("fails a stalled bridge navigate on the host deadline instead of losing to the broker", async () => {
+    const runtimeTabId = previewRuntimeTabId(threadRef, serverEpoch, snapshot.tabId);
+    mocks.automationStatus.mockImplementation(async () => automationStatus);
+    mocks.navigate.mockImplementation(() => new Promise<void>(() => {}));
+    reconcilePreviewServerSessions(threadRef, {
+      sessions: [snapshot],
+      serverEpoch,
+      revision: 1,
+    });
+    applyPreviewDesktopState(threadRef, snapshot.tabId, desktopOverlay);
+    vi.stubGlobal("document", renderingWebviewDocument(runtimeTabId));
+    const response = deferred<PreviewAutomationResponse>();
+    let respondedAt: number | undefined;
+    mocks.respond.mockImplementationOnce(async ({ input }) => {
+      respondedAt = Date.now();
+      response.resolve(input);
+    });
+
+    vi.useFakeTimers();
+    try {
+      const startedAt = Date.now();
+      await act(async () => {
+        appAtomRegistry.set(requestsAtom, AsyncResult.success(navigateRequestEvent));
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(requestTimeoutMs);
+      });
+      // The navigation readiness wait shares this deadline, so an unbounded
+      // navigate is the one call that can still outlive the broker.
+      expect(respondedAt).toBeDefined();
+      expect(respondedAt ?? Number.POSITIVE_INFINITY).toBeLessThan(startedAt + requestTimeoutMs);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    await expect(response.promise).resolves.toMatchObject({
+      requestId: "navigate-request",
+      ok: false,
+      error: {
+        _tag: "PreviewAutomationTimeoutError",
+        hostTag: "PreviewAutomationBridgeTimeoutError",
+      },
+    });
+    expect(mocks.navigate).toHaveBeenCalledExactlyOnceWith(runtimeTabId, navigateUrl);
     expect(useBrowserSurfaceStore.getState().activityByTabId[runtimeTabId]).toBeUndefined();
   });
 });
