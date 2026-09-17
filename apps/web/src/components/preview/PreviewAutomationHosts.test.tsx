@@ -163,6 +163,18 @@ const statusRequestEvent: PreviewAutomationStreamEvent = {
   },
 };
 const navigateUrl = "http://example.test/next";
+const reopenRequestEvent: PreviewAutomationStreamEvent = {
+  type: "request",
+  connectionId: "automation-connection",
+  request: {
+    requestId: "reopen-request",
+    threadId,
+    operation: "open",
+    tabId: snapshot.tabId,
+    input: { url: navigateUrl, reuseExistingTab: true, open: false },
+    timeoutMs: requestTimeoutMs,
+  },
+};
 const navigateRequestEvent: PreviewAutomationStreamEvent = {
   type: "request",
   connectionId: "automation-connection",
@@ -451,6 +463,52 @@ describe("PreviewAutomationHosts navigate", () => {
       },
     });
     expect(mocks.navigate).toHaveBeenCalledExactlyOnceWith(runtimeTabId, navigateUrl);
+    expect(useBrowserSurfaceStore.getState().activityByTabId[runtimeTabId]).toBeUndefined();
+  });
+
+  it("fails a stalled navigate on the host deadline when an open reuses a tab", async () => {
+    const runtimeTabId = previewRuntimeTabId(threadRef, serverEpoch, snapshot.tabId);
+    mocks.automationStatus.mockImplementation(async () => automationStatus);
+    mocks.navigate.mockImplementation(() => new Promise<void>(() => {}));
+    reconcilePreviewServerSessions(threadRef, {
+      sessions: [snapshot],
+      serverEpoch,
+      revision: 1,
+    });
+    applyPreviewDesktopState(threadRef, snapshot.tabId, desktopOverlay);
+    vi.stubGlobal("document", renderingWebviewDocument(runtimeTabId));
+    const response = deferred<PreviewAutomationResponse>();
+    let respondedAt: number | undefined;
+    mocks.respond.mockImplementationOnce(async ({ input }) => {
+      respondedAt = Date.now();
+      response.resolve(input);
+    });
+
+    vi.useFakeTimers();
+    try {
+      const startedAt = Date.now();
+      await act(async () => {
+        appAtomRegistry.set(requestsAtom, AsyncResult.success(reopenRequestEvent));
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(requestTimeoutMs);
+      });
+      expect(respondedAt).toBeDefined();
+      expect(respondedAt ?? Number.POSITIVE_INFINITY).toBeLessThan(startedAt + requestTimeoutMs);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    await expect(response.promise).resolves.toMatchObject({
+      requestId: "reopen-request",
+      ok: false,
+      error: {
+        _tag: "PreviewAutomationTimeoutError",
+        hostTag: "PreviewAutomationBridgeTimeoutError",
+      },
+    });
+    expect(mocks.navigate).toHaveBeenCalledExactlyOnceWith(runtimeTabId, navigateUrl);
+    expect(mocks.open).not.toHaveBeenCalled();
     expect(useBrowserSurfaceStore.getState().activityByTabId[runtimeTabId]).toBeUndefined();
   });
 });
