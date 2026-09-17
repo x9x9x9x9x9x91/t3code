@@ -1,6 +1,7 @@
 import {
   EnvironmentId,
   type PreviewAutomationHost,
+  type PreviewAutomationHostErrorTag,
   PreviewAutomationOperation,
   PreviewAutomationRecordingTransferError,
   PreviewAutomationRecordingDesktopUpdateRequiredError,
@@ -105,6 +106,9 @@ export class PreviewAutomationBridgeTimeoutError extends Schema.TaggedError<Prev
     return `Preview automation ${this.operation} for request ${this.requestId} on environment ${this.environmentId} thread ${this.threadId} tab ${this.tabId} did not answer within its remaining ${this.timeoutMs}ms.`;
   }
 }
+
+/** Tells a call that ran out of deadline apart from a guest that threw. */
+export const isPreviewAutomationBridgeTimeoutError = Schema.is(PreviewAutomationBridgeTimeoutError);
 
 export class PreviewAutomationTargetUnavailableError extends Schema.TaggedError<PreviewAutomationTargetUnavailableError>()(
   "PreviewAutomationTargetUnavailableError",
@@ -265,7 +269,9 @@ export function serializePreviewAutomationHostError(
   );
   return {
     _tag: "responseTag" in error ? error.responseTag : error._tag,
-    hostTag: error._tag,
+    // The broker only quotes a host tag it recognizes, so a class missing from
+    // that list would reach the agent as an unknown one.
+    hostTag: error._tag satisfies PreviewAutomationHostErrorTag,
     message: error.message,
     ...(Object.keys(detail).length === 0 ? {} : { detail }),
   };

@@ -720,6 +720,68 @@ const PreviewAutomationOptionalRemoteDiagnosticFields = {
 };
 
 /**
+ * The classes a preview automation host can name in a failure.
+ *
+ * Keep in step with the `PreviewAutomationHostError` union in
+ * `apps/web/src/components/preview/previewAutomationErrors.ts`, which the host
+ * sends as `hostTag`. `serializePreviewAutomationHostError` checks that side
+ * against this list, so a new host class missing here fails typecheck rather
+ * than reaching an agent unnamed.
+ */
+export const PREVIEW_AUTOMATION_HOST_ERROR_TAGS = [
+  "PreviewAutomationRecordingTransferError",
+  "PreviewAutomationRecordingDesktopUpdateRequiredError",
+  "PreviewAutomationRecordingTooLargeError",
+  "PreviewAutomationRecordingDeadlineExpiredError",
+  "PreviewAutomationOverlayTimeoutError",
+  "PreviewAutomationNavigationTimeoutError",
+  "PreviewAutomationViewportTimeoutError",
+  "PreviewAutomationBridgeTimeoutError",
+  "PreviewAutomationTargetUnavailableError",
+  "PreviewAutomationRecordingNotActiveError",
+  "PreviewAutomationTargetNotEditableHostError",
+  "PreviewAutomationOperationError",
+] as const;
+export type PreviewAutomationHostErrorTag = (typeof PREVIEW_AUTOMATION_HOST_ERROR_TAGS)[number];
+
+/** The broker's own classes, the coarse bucket a host picks its response tag from. */
+const PREVIEW_AUTOMATION_BROKER_ERROR_TAGS = [
+  "PreviewAutomationUnavailableError",
+  "PreviewAutomationNoAvailableHostError",
+  "PreviewAutomationUnsupportedClientError",
+  "PreviewAutomationTabNotFoundError",
+  "PreviewAutomationTimeoutError",
+  "PreviewAutomationControlInterruptedError",
+  "PreviewAutomationExecutionError",
+  "PreviewAutomationInvalidSelectorError",
+  "PreviewAutomationTargetNotEditableError",
+  "PreviewAutomationResultTooLargeError",
+  "PreviewAutomationClientDisconnectedError",
+  "PreviewAutomationRequestQueueClosedError",
+  "PreviewAutomationRemoteUnavailableError",
+  "PreviewAutomationMalformedResponseError",
+] as const;
+
+const PREVIEW_AUTOMATION_KNOWN_REMOTE_TAGS: ReadonlySet<string> = new Set([
+  ...PREVIEW_AUTOMATION_HOST_ERROR_TAGS,
+  ...PREVIEW_AUTOMATION_BROKER_ERROR_TAGS,
+]);
+
+/** What an unrecognized remote tag is reported as. */
+export const UNKNOWN_PREVIEW_AUTOMATION_REMOTE_TAG = "UnknownHostError";
+
+/**
+ * Keeps a remote tag to the fixed identifiers our own code raises.
+ *
+ * `_tag` and `hostTag` both arrive from the host and neither is bounded, so a
+ * tag quoted on trust is a host writing into the sentence an agent reads. An
+ * unlisted tag is reported as `UNKNOWN_PREVIEW_AUTOMATION_REMOTE_TAG`, which
+ * still separates a host that failed from one we have a class for.
+ */
+export const previewAutomationRemoteTag = (tag: string): string =>
+  PREVIEW_AUTOMATION_KNOWN_REMOTE_TAGS.has(tag) ? tag : UNKNOWN_PREVIEW_AUTOMATION_REMOTE_TAG;
+
+/**
  * Names the remote class behind a generic failure.
  *
  * The broker's own tags are coarse on purpose, so "timed out" alone cannot say

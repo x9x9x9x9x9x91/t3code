@@ -17,6 +17,7 @@ import {
   PreviewAutomationTargetNotEditableError,
   PreviewAutomationTimeoutError,
   PreviewAutomationUnsupportedClientError,
+  previewAutomationRemoteTag,
   PreviewTabId,
   type PreviewAutomationError,
   type PreviewAutomationOperation,
@@ -198,7 +199,9 @@ const classifyResponseError = (
   const remoteDiagnostics = {
     // The host's own class, when it sent one: the response tag is the coarse
     // bucket it chose, and several distinct host failures share one bucket.
-    remoteTag: error.hostTag ?? error._tag,
+    // Both fields come off the wire unbounded, and this one is quoted into the
+    // agent's failure text, so only tags our own code raises survive.
+    remoteTag: previewAutomationRemoteTag(error.hostTag ?? error._tag),
     remoteMessageLength: error.message.length,
     ...(error.detail === undefined ? {} : { remoteDetailKind: remoteDetailKind(error.detail) }),
     cause: error,
