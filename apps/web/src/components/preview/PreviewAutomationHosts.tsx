@@ -224,9 +224,26 @@ const waitForRenderedViewport = async (
   });
 };
 
+/** Bounds one bridge call by the owning request's host deadline. */
+type BoundedBridgeCall = <T>(tabId: string, call: () => Promise<T>) => Promise<T>;
+
+/**
+ * A viewport read that threw is absent; one that expired fails the request.
+ *
+ * Registration and navigation can replace the guest mid-render, so a throwing
+ * read is not news and the status simply omits the viewport. A read that spent
+ * the whole deadline is news: the page cannot answer, and a status without the
+ * viewport would report that page as fine.
+ */
+const viewportReadFailure = (cause: unknown): null => {
+  if (cause instanceof PreviewAutomationBridgeTimeoutError) throw cause;
+  return null;
+};
+
 const currentStatus = async (
   threadRef: ScopedThreadRef,
   requestedTabId: string | null,
+  bounded: BoundedBridgeCall,
 ): Promise<PreviewAutomationStatus> => {
   const state = readThreadPreviewState(threadRef);
   const { snapshot, tabId } = resolvePreviewAutomationTarget(state, requestedTabId);
@@ -237,15 +254,16 @@ const currentStatus = async (
   const renderingActive = runtimeTabId ? isPreviewWebviewRendering(runtimeTabId) : false;
   const viewportSetting = snapshot ? (snapshot.viewport ?? FILL_PREVIEW_VIEWPORT) : undefined;
   const viewport =
-    runtimeTabId && renderingActive
-      ? await readRenderedViewport(runtimeTabId).catch(() => null)
+    runtimeTabId && tabId && renderingActive
+      ? await bounded(tabId, () => readRenderedViewport(runtimeTabId)).catch(viewportReadFailure)
       : null;
   const viewportStatus = {
     ...(viewportSetting === undefined ? {} : { viewportSetting }),
     ...(viewport === null ? {} : { viewport }),
   };
-  if (runtimeTabId && tabId && previewBridge && state.desktopByTabId[tabId]) {
-    const status = await previewBridge.automation.status(runtimeTabId);
+  const bridge = previewBridge;
+  if (runtimeTabId && tabId && bridge && state.desktopByTabId[tabId]) {
+    const status = await bounded(tabId, () => bridge.automation.status(runtimeTabId));
     return { ...status, tabId, visible, ...viewportStatus };
   }
   const navStatus = snapshot?.navStatus;
@@ -424,7 +442,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
         };
         switch (request.operation) {
           case "status":
-            return await currentStatus(threadRef, tabId);
+            return await currentStatus(threadRef, tabId, bounded);
           case "open": {
             const input = request.input as PreviewAutomationOpenInput;
             const resolvedInputUrl = input.url
@@ -558,7 +576,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
                 remainingHostBudgetMs(hostDeadlineMs),
               );
             }
-            return await currentStatus(threadRef, activeTabId);
+            return await currentStatus(threadRef, activeTabId, bounded);
           }
           case "navigate": {
             const ready = await requireReadyTab();
@@ -580,7 +598,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
               input.readiness ?? "load",
               remainingHostBudgetMs(hostDeadlineMs),
             );
-            return await currentStatus(threadRef, ready.tabId);
+            return await currentStatus(threadRef, ready.tabId, bounded);
           }
           case "resize": {
             const ready = await requireReadyTab();
