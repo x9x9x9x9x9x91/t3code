@@ -1,8 +1,10 @@
+import { PreviewAutomationError } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import type * as Types from "effect/Types";
@@ -95,6 +97,22 @@ const McpAuthMiddlewareLive = HttpRouter.middleware<{
   provides: McpInvocationContext.McpInvocationContext;
 }>()(makeMcpAuthMiddleware).layer;
 
+const isPreviewAutomationError = Schema.is(PreviewAutomationError);
+
+/**
+ * The text an agent reads has to name the failure, not just the tool.
+ *
+ * Only our own preview failures are quoted: every one of them builds its
+ * message from fixed identifiers and its own fields, so nothing a remote host
+ * wrote reaches the agent this way. Anything else, a schema rejection for
+ * instance, keeps the generic sentence.
+ */
+const previewSnapshotFailureText = (failure: unknown): string => {
+  if (!isPreviewAutomationError(failure)) return "Preview snapshot failed.";
+  const { message } = failure;
+  return `Preview snapshot failed: ${message.endsWith(".") ? message : `${message}.`}`;
+};
+
 const previewSnapshotFailure = <E>(cause: Cause.Cause<E>) => {
   if (Cause.hasInterrupts(cause) || cause.reasons.some(Cause.isDieReason)) {
     return Effect.failCause(cause).pipe(Effect.orDie);
@@ -117,7 +135,7 @@ const previewSnapshotFailure = <E>(cause: Cause.Cause<E>) => {
         failureCount: failures.length,
       },
     },
-    content: [{ type: "text", text: "Preview snapshot failed." }],
+    content: [{ type: "text", text: previewSnapshotFailureText(firstFailure) }],
   });
   return Effect.logWarning("preview snapshot failed", {
     operation: "snapshot",
