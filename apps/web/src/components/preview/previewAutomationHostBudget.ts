@@ -29,8 +29,8 @@ export function remainingHostBudgetMs(deadlineMs: number): number {
 /** How long a probe that has not answered yet keeps the loop waiting. */
 const HOST_POLL_INTERVAL_MS = 50;
 
-/** What a probe returns when the request deadline arrived before the probe did. */
-const HOST_DEADLINE_EXPIRED = Symbol("previewAutomationHostDeadlineExpired");
+/** What a bounded wait returns when the request deadline arrived before the answer did. */
+export const HOST_DEADLINE_EXPIRED = Symbol("previewAutomationHostDeadlineExpired");
 
 /**
  * Bounds one probe by the request's host deadline.
@@ -57,6 +57,25 @@ async function raceHostDeadline<T>(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+/**
+ * Bounds one bridge call by the request's host deadline.
+ *
+ * Readiness waits already share the deadline, so an unbounded operation is the
+ * last way one request can outlive the broker: the guest keeps working, the
+ * broker answers the agent with its own generic timeout, and the late host
+ * response is dropped with the class that would have explained it. An
+ * exhausted budget starts no call at all, the rule `pollUntilHostDeadline`
+ * follows for probes. `HOST_DEADLINE_EXPIRED` means the deadline won; the
+ * caller owns the host error that says which operation ran out.
+ */
+export async function raceBridgeCall<T>(
+  deadlineMs: number,
+  call: () => Promise<T>,
+): Promise<T | typeof HOST_DEADLINE_EXPIRED> {
+  if (remainingHostBudgetMs(deadlineMs) <= 0) return HOST_DEADLINE_EXPIRED;
+  return await raceHostDeadline(deadlineMs, call);
 }
 
 /**

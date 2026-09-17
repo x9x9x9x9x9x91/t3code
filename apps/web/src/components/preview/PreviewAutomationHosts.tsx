@@ -62,6 +62,7 @@ import { useAtomCommand } from "~/state/use-atom-command";
 
 import { previewBridge } from "./previewBridge";
 import {
+  PreviewAutomationBridgeTimeoutError,
   PreviewAutomationOperationError,
   PreviewAutomationOverlayTimeoutError,
   PreviewAutomationRecordingNotActiveError,
@@ -87,7 +88,9 @@ import {
   resolvePreviewAutomationTarget,
 } from "./previewAutomationTarget";
 import {
+  HOST_DEADLINE_EXPIRED,
   pollUntilHostDeadline,
+  raceBridgeCall,
   remainingHostBudgetMs,
   resolveHostWaitBudgetMs,
   waitForHostReadiness,
@@ -405,6 +408,28 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
             runtimeTabId,
           };
         };
+        /**
+         * The operation spends what the readiness waits left of the deadline.
+         *
+         * A blocked guest keeps a bridge call pending past the broker's
+         * timeout, and the broker's generic failure then replaces the class
+         * that names the operation and its budget.
+         */
+        const bounded = async <T,>(boundedTabId: string, call: () => Promise<T>): Promise<T> => {
+          const timeoutMs = remainingHostBudgetMs(hostDeadlineMs);
+          const result = await raceBridgeCall(hostDeadlineMs, call);
+          if (result === HOST_DEADLINE_EXPIRED) {
+            throw new PreviewAutomationBridgeTimeoutError({
+              requestId: request.requestId,
+              operation: request.operation,
+              environmentId,
+              threadId: request.threadId,
+              tabId: boundedTabId,
+              timeoutMs,
+            });
+          }
+          return result;
+        };
         switch (request.operation) {
           case "status":
             return await currentStatus(threadRef, tabId);
@@ -656,7 +681,9 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           case "setColorScheme": {
             const ready = await requireReadyTab();
             const input = request.input as PreviewAutomationSetColorSchemeInput;
-            await ready.bridge.setColorScheme(ready.runtimeTabId, input.colorScheme);
+            await bounded(ready.tabId, () =>
+              ready.bridge.setColorScheme(ready.runtimeTabId, input.colorScheme),
+            );
             return {
               tabId: ready.tabId,
               colorScheme: input.colorScheme,
@@ -664,48 +691,62 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           }
           case "snapshot": {
             const ready = await requireReadyTab();
-            return await ready.bridge.automation.snapshot(ready.runtimeTabId);
+            return await bounded(ready.tabId, () =>
+              ready.bridge.automation.snapshot(ready.runtimeTabId),
+            );
           }
           case "click": {
             const ready = await requireReadyTab();
-            return await ready.bridge.automation.click(
-              ready.runtimeTabId,
-              request.input as Parameters<typeof ready.bridge.automation.click>[1],
+            return await bounded(ready.tabId, () =>
+              ready.bridge.automation.click(
+                ready.runtimeTabId,
+                request.input as Parameters<typeof ready.bridge.automation.click>[1],
+              ),
             );
           }
           case "type": {
             const ready = await requireReadyTab();
-            return await ready.bridge.automation.type(
-              ready.runtimeTabId,
-              request.input as Parameters<typeof ready.bridge.automation.type>[1],
+            return await bounded(ready.tabId, () =>
+              ready.bridge.automation.type(
+                ready.runtimeTabId,
+                request.input as Parameters<typeof ready.bridge.automation.type>[1],
+              ),
             );
           }
           case "press": {
             const ready = await requireReadyTab();
-            return await ready.bridge.automation.press(
-              ready.runtimeTabId,
-              request.input as Parameters<typeof ready.bridge.automation.press>[1],
+            return await bounded(ready.tabId, () =>
+              ready.bridge.automation.press(
+                ready.runtimeTabId,
+                request.input as Parameters<typeof ready.bridge.automation.press>[1],
+              ),
             );
           }
           case "scroll": {
             const ready = await requireReadyTab();
-            return await ready.bridge.automation.scroll(
-              ready.runtimeTabId,
-              request.input as Parameters<typeof ready.bridge.automation.scroll>[1],
+            return await bounded(ready.tabId, () =>
+              ready.bridge.automation.scroll(
+                ready.runtimeTabId,
+                request.input as Parameters<typeof ready.bridge.automation.scroll>[1],
+              ),
             );
           }
           case "evaluate": {
             const ready = await requireReadyTab();
-            return await ready.bridge.automation.evaluate(
-              ready.runtimeTabId,
-              request.input as Parameters<typeof ready.bridge.automation.evaluate>[1],
+            return await bounded(ready.tabId, () =>
+              ready.bridge.automation.evaluate(
+                ready.runtimeTabId,
+                request.input as Parameters<typeof ready.bridge.automation.evaluate>[1],
+              ),
             );
           }
           case "waitFor": {
             const ready = await requireReadyTab();
-            return await ready.bridge.automation.waitFor(
-              ready.runtimeTabId,
-              request.input as Parameters<typeof ready.bridge.automation.waitFor>[1],
+            return await bounded(ready.tabId, () =>
+              ready.bridge.automation.waitFor(
+                ready.runtimeTabId,
+                request.input as Parameters<typeof ready.bridge.automation.waitFor>[1],
+              ),
             );
           }
           case "recordingStart": {
