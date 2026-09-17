@@ -90,7 +90,14 @@ it.effect.each([{}, { includeImage: false }])(
           );
 
         expect(snapshot.isError).toBe(true);
-        expect(snapshot.content).toEqual([{ type: "text", text: "Preview snapshot failed." }]);
+        // The class behind the failure has to reach the agent's text: the
+        // structured error is not what an agent reads back.
+        expect(snapshot.content).toEqual([
+          {
+            type: "text",
+            text: "Preview snapshot failed: Preview automation snapshot failed on client mcp-failure-client.",
+          },
+        ]);
         expect(snapshot.structuredContent).toEqual({
           error: {
             _tag: "PreviewAutomationExecutionError",
@@ -344,6 +351,8 @@ it.effect("rejects non-boolean snapshot image options before selecting a browser
           Effect.provideService(McpSchema.McpServerClient, client),
         );
       expect(result.isError).toBe(true);
+      // A schema rejection is not one of our preview failures, so its text
+      // stays generic rather than quoting a decoder message at the agent.
       expect(result.content).toEqual([{ type: "text", text: "Preview snapshot failed." }]);
       expect(result.structuredContent).toEqual({
         error: { _tag: "AiError", operation: "snapshot", failureCount: 1 },

@@ -4,6 +4,7 @@ import {
   ThreadId,
   type ClientSettings,
   type PreviewAutomationResponse,
+  type PreviewAutomationStatus,
   type PreviewAutomationStreamEvent,
   type PreviewOpenInput,
   type PreviewSessionSnapshot,
@@ -13,8 +14,16 @@ import { act } from "react";
 import { create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { useBrowserSurfaceStore } from "~/browser/browserSurfaceStore";
+import { previewRuntimeTabId } from "~/browser/previewRuntimeTabId";
 import { __resetClientSettingsPersistenceForTests } from "~/hooks/useSettings";
-import { readThreadPreviewState, resetPreviewStateForTests } from "~/previewStateStore";
+import {
+  applyPreviewDesktopState,
+  readThreadPreviewState,
+  reconcilePreviewServerSessions,
+  resetPreviewStateForTests,
+  type DesktopPreviewOverlay,
+} from "~/previewStateStore";
 import { appAtomRegistry, AppAtomRegistryProvider } from "~/rpc/atomRegistry";
 
 import { PreviewAutomationHosts } from "./PreviewAutomationHosts";
@@ -32,6 +41,8 @@ const mocks = vi.hoisted(() => ({
       (target: { environmentId: EnvironmentId; input: PreviewAutomationResponse }) => Promise<void>
     >(),
   focus: vi.fn(async () => undefined),
+  automationStatus: vi.fn<(runtimeTabId: string) => Promise<PreviewAutomationStatus>>(),
+  automationSnapshot: vi.fn<(runtimeTabId: string) => Promise<unknown>>(),
 }));
 
 vi.mock("~/localApi", () => ({
@@ -57,7 +68,11 @@ vi.mock("~/state/use-atom-command", () => ({
 vi.mock("~/state/use-atom-query-runner", () => ({
   useAtomQueryRunner: () => mocks.list,
 }));
-vi.mock("./previewBridge", () => ({ previewBridge: { automation: {} } }));
+vi.mock("./previewBridge", () => ({
+  previewBridge: {
+    automation: { status: mocks.automationStatus, snapshot: mocks.automationSnapshot },
+  },
+}));
 
 const environmentId = EnvironmentId.make("automation-environment");
 const threadId = ThreadId.make("automation-thread");
@@ -79,8 +94,41 @@ const snapshot: PreviewSessionSnapshot = {
   profileId: "work",
   updatedAt: "2026-09-05T00:00:00.000Z",
 };
-const emptyList = { sessions: [], serverEpoch: "test-server", revision: 0 };
+const serverEpoch = "test-server";
+const emptyList = { sessions: [], serverEpoch, revision: 0 };
 const listAtom = Atom.make(AsyncResult.success(emptyList));
+const desktopOverlay: DesktopPreviewOverlay = {
+  hasWebContents: true,
+  canGoBack: false,
+  canGoForward: false,
+  loading: false,
+  zoomFactor: 1,
+  pictureInPicture: false,
+  colorScheme: "system",
+  audioMuted: false,
+  audible: false,
+  controller: "agent",
+  favicon: null,
+};
+const automationStatus: PreviewAutomationStatus = {
+  available: true,
+  visible: true,
+  tabId: snapshot.tabId,
+  url: "http://example.test/",
+  title: "Example",
+  loading: false,
+};
+
+/** A rendering guest is what `waitForDesktopOverlay` probes for before it runs an operation. */
+const renderingWebviewDocument = (runtimeTabId: string) => ({
+  hasFocus: () => false,
+  querySelectorAll: () => [
+    {
+      getAttribute: (name: string) => (name === "data-preview-tab" ? runtimeTabId : null),
+      closest: () => ({ getAttribute: () => "active" }),
+    },
+  ],
+});
 const requestsAtom = Atom.make<AsyncResult.AsyncResult<PreviewAutomationStreamEvent, Error>>(
   AsyncResult.initial(false),
 );
@@ -93,6 +141,19 @@ const requestEvent: PreviewAutomationStreamEvent = {
     operation: "open",
     input: { open: false, reuseExistingTab: false },
     timeoutMs: 15_000,
+  },
+};
+const snapshotRequestTimeoutMs = 15_000;
+const snapshotRequestEvent: PreviewAutomationStreamEvent = {
+  type: "request",
+  connectionId: "automation-connection",
+  request: {
+    requestId: "snapshot-request",
+    threadId,
+    operation: "snapshot",
+    tabId: snapshot.tabId,
+    input: {},
+    timeoutMs: snapshotRequestTimeoutMs,
   },
 };
 
@@ -186,5 +247,57 @@ describe("PreviewAutomationHosts open", () => {
     expect(mocks.open).not.toHaveBeenCalled();
     expect(readThreadPreviewState(threadRef).snapshot).toBeNull();
     expect(mocks.setClientSettings).not.toHaveBeenCalled();
+  });
+});
+
+describe("PreviewAutomationHosts snapshot", () => {
+  it("fails a stalled bridge snapshot on the host deadline instead of losing to the broker", async () => {
+    const runtimeTabId = previewRuntimeTabId(threadRef, serverEpoch, snapshot.tabId);
+    mocks.automationStatus.mockImplementation(async () => automationStatus);
+    mocks.automationSnapshot.mockImplementation(() => new Promise(() => {}));
+    reconcilePreviewServerSessions(threadRef, {
+      sessions: [snapshot],
+      serverEpoch,
+      revision: 1,
+    });
+    applyPreviewDesktopState(threadRef, snapshot.tabId, desktopOverlay);
+    vi.stubGlobal("document", renderingWebviewDocument(runtimeTabId));
+    const response = deferred<PreviewAutomationResponse>();
+    let respondedAt: number | undefined;
+    mocks.respond.mockImplementationOnce(async ({ input }) => {
+      respondedAt = Date.now();
+      response.resolve(input);
+    });
+
+    vi.useFakeTimers();
+    try {
+      const startedAt = Date.now();
+      await act(async () => {
+        appAtomRegistry.set(requestsAtom, AsyncResult.success(snapshotRequestEvent));
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(snapshotRequestTimeoutMs);
+      });
+      // The broker fails the request at request.timeoutMs, so a host answer
+      // that arrives later is dropped and the agent never learns the class.
+      expect(respondedAt).toBeDefined();
+      expect(respondedAt ?? Number.POSITIVE_INFINITY).toBeLessThan(
+        startedAt + snapshotRequestTimeoutMs,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+
+    await expect(response.promise).resolves.toMatchObject({
+      requestId: "snapshot-request",
+      ok: false,
+      error: {
+        _tag: "PreviewAutomationTimeoutError",
+        hostTag: "PreviewAutomationBridgeTimeoutError",
+      },
+    });
+    expect(mocks.automationSnapshot).toHaveBeenCalledExactlyOnceWith(runtimeTabId);
+    expect(mocks.list).not.toHaveBeenCalled();
+    expect(useBrowserSurfaceStore.getState().activityByTabId[runtimeTabId]).toBeUndefined();
   });
 });

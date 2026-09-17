@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
+  HOST_DEADLINE_EXPIRED,
   PREVIEW_HOST_RESPONSE_MARGIN_MS,
   pollUntilHostDeadline,
+  raceBridgeCall,
   remainingHostBudgetMs,
   resolveHostWaitBudgetMs,
   waitForHostReadiness,
@@ -189,6 +191,86 @@ describe("pollUntilHostDeadline", () => {
     const error = new Error("Preview target was replaced");
 
     await expect(pollUntilHostDeadline(800, vi.fn().mockRejectedValue(error))).rejects.toBe(error);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe("raceBridgeCall", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("gives up on a bridge call that never answers, at the deadline the waits left it", async () => {
+    const deadlineMs = Date.now() + resolveHostWaitBudgetMs(15_000);
+    await vi.advanceTimersByTimeAsync(2_000);
+    const call = vi.fn(() => new Promise<string>(() => {}));
+    let finishedAt: number | undefined;
+    const result = raceBridgeCall(deadlineMs, call).then((value) => {
+      finishedAt = Date.now();
+      return value;
+    });
+
+    await vi.advanceTimersByTimeAsync(11_499);
+    expect(finishedAt).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(await result).toBe(HOST_DEADLINE_EXPIRED);
+    expect(finishedAt).toBe(deadlineMs);
+    expect(call).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("keeps the answer of a call that beats the deadline and clears its timeout", async () => {
+    const call = vi.fn(
+      () => new Promise<string>((resolve) => setTimeout(() => resolve("snapshot"), 40)),
+    );
+    const result = raceBridgeCall(800, call);
+
+    await vi.advanceTimersByTimeAsync(40);
+
+    expect(await result).toBe("snapshot");
+    expect(call).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  // Same rule as pollUntilHostDeadline: a budget that is already spent starts
+  // no work, because its answer could only arrive after the broker's own.
+  it.each([0, -5_000])("starts no call with %ims of budget left", async (remainingMs) => {
+    const call = vi.fn(async () => "snapshot");
+
+    expect(await raceBridgeCall(Date.now() + remainingMs, call)).toBe(HOST_DEADLINE_EXPIRED);
+    expect(call).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("propagates a bridge failure instead of reporting a deadline", async () => {
+    const error = new Error("Preview guest stopped responding");
+
+    await expect(raceBridgeCall(800, vi.fn().mockRejectedValue(error))).rejects.toBe(error);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("ignores an answer that arrives after the deadline won", async () => {
+    let completeCall!: (value: string) => void;
+    const call = vi.fn(
+      () =>
+        new Promise<string>((resolve) => {
+          completeCall = resolve;
+        }),
+    );
+    const result = raceBridgeCall(80, call);
+
+    await vi.advanceTimersByTimeAsync(80);
+    expect(await result).toBe(HOST_DEADLINE_EXPIRED);
+
+    completeCall("snapshot");
+    await vi.runAllTimersAsync();
+    expect(call).toHaveBeenCalledOnce();
     expect(vi.getTimerCount()).toBe(0);
   });
 });
