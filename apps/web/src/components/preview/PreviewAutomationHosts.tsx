@@ -56,6 +56,7 @@ import { useAtomCommand } from "~/state/use-atom-command";
 
 import { previewBridge } from "./previewBridge";
 import {
+  isPreviewAutomationBridgeTimeoutError,
   PreviewAutomationBridgeTimeoutError,
   PreviewAutomationOperationError,
   PreviewAutomationOverlayTimeoutError,
@@ -236,7 +237,7 @@ type BoundedBridgeCall = <T>(tabId: string, call: () => Promise<T>) => Promise<T
  * viewport would report that page as fine.
  */
 const viewportReadFailure = (cause: unknown): null => {
-  if (cause instanceof PreviewAutomationBridgeTimeoutError) throw cause;
+  if (isPreviewAutomationBridgeTimeoutError(cause)) throw cause;
   return null;
 };
 
