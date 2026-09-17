@@ -75,6 +75,33 @@ export class PreviewAutomationViewportTimeoutError extends Schema.TaggedErrorCla
   }
 }
 
+/**
+ * A bridge call that did not answer inside what the readiness waits left it.
+ *
+ * The guest is not cancelled by this: it finishes its own work and its late
+ * answer is dropped. What this buys is the class reaching the agent, instead
+ * of the broker's generic timeout standing in for every stalled operation.
+ */
+export class PreviewAutomationBridgeTimeoutError extends Schema.TaggedErrorClass<PreviewAutomationBridgeTimeoutError>()(
+  "PreviewAutomationBridgeTimeoutError",
+  {
+    requestId: TrimmedNonEmptyString,
+    operation: PreviewAutomationOperation,
+    environmentId: EnvironmentId,
+    threadId: ThreadId,
+    tabId: PreviewTabId,
+    timeoutMs: Schema.Int,
+  },
+) {
+  get responseTag() {
+    return "PreviewAutomationTimeoutError" as const;
+  }
+
+  override get message(): string {
+    return `Preview automation ${this.operation} for request ${this.requestId} on environment ${this.environmentId} thread ${this.threadId} tab ${this.tabId} did not answer within its remaining ${this.timeoutMs}ms.`;
+  }
+}
+
 export class PreviewAutomationTargetUnavailableError extends Schema.TaggedErrorClass<PreviewAutomationTargetUnavailableError>()(
   "PreviewAutomationTargetUnavailableError",
   {
@@ -209,6 +236,7 @@ export const PreviewAutomationHostError = Schema.Union([
   PreviewAutomationOverlayTimeoutError,
   PreviewAutomationNavigationTimeoutError,
   PreviewAutomationViewportTimeoutError,
+  PreviewAutomationBridgeTimeoutError,
   PreviewAutomationTargetUnavailableError,
   PreviewAutomationRecordingNotActiveError,
   PreviewAutomationTargetNotEditableHostError,
