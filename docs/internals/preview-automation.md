@@ -3,8 +3,8 @@
 The preview tools (`preview_snapshot`, `preview_resize`, `preview_evaluate`, …)
 drive a real Electron `WebContentsView` through CDP. With the preview panel
 closed the tab still exists and still runs script, so `preview_evaluate` keeps
-working: script execution needs no composited frame. `preview_snapshot` is the
-one that fails there, and why is still open.
+working: script execution needs no composited frame. `preview_snapshot` works on
+a hidden tab as well; what defeats it is a page that blocks its own main thread.
 
 CDP answers a result JSON cannot carry — `1n`, `NaN`, `Infinity`, `-0`, a symbol
 — with `unserializableValue` or a bare type and no `value`, and a non-null object
@@ -23,36 +23,41 @@ new viewport. That wait is bounded by the request's host deadline, so a renderer
 that never reports costs the wait rather than the whole request, and the agent
 gets the viewport timeout instead of the broker's generic one.
 
-## The snapshot failure is unexplained
+## A snapshot timeout is a blocked page
 
-The obvious story — panel closed, so the guest is offscreen, so capture fails —
-is not established, and the code argues against it. Automation takes a surface
-activity lease for the whole operation and releases it in a `finally`
-(`acquireBrowserSurfaceActivity` in `apps/web/src/components/preview/PreviewAutomationHosts.tsx`),
-and it waits for the wrapper to report `data-preview-rendering="active"` before
-probing. That activity is what keeps a hidden guest paintable:
-`resolveHostedBrowserWebviewWrapperStyle` (`apps/web/src/browser/hostedBrowserWebviewStyle.ts`)
-parks a rendering-active guest at `(0,0)` behind the app exactly because Electron
-stops compositing a guest that sits fully outside the window.
+Measured on 2026-09-17 against the installed build, with the panel closed: four
+`preview_snapshot` calls returned a PNG in about 20 ms of desktop time each, so
+the offscreen-guest story was wrong. Automation holds a surface activity lease
+for the whole operation and waits for `data-preview-rendering="active"` before
+it probes (`acquireBrowserSurfaceActivity` in
+`apps/web/src/components/preview/PreviewAutomationHosts.tsx`), and that activity
+is what keeps a hidden guest paintable:
+`resolveHostedBrowserWebviewWrapperStyle`
+(`apps/web/src/browser/hostedBrowserWebviewStyle.ts`) parks a rendering-active
+guest at `(0,0)` behind the app rather than fully outside the window, which is
+where Electron stops compositing.
 
-What was observed, on 2026-09-14 with the panel closed: five `preview_snapshot`
-calls failed in 6–14 s each and the agent saw only `Preview snapshot failed.`
-The snapshot failure path puts the error class in `structuredContent` but not in
-the text (`apps/server/src/mcp/McpHttpServer.ts`), and the server traces from
-that day have rotated, so the class behind those five is unrecoverable. Capture
-never starting, `capturePage` rejecting or stalling through all three attempts,
-and the request simply losing to the broker timeout are all still open.
+The same run against a page holding its main thread in a 25 s `while` loop is
+the failure: the desktop capture span `PreviewManager.automationSnapshot` ran
+24,142 ms and then succeeded, while the broker had already failed the request at
+its 15,000 ms timeout. The host's answer reached
+`PreviewAutomationBroker.respond` 9 s after that and was dropped, so the agent
+saw one sentence with no class in it.
 
-Settling it needs a live run against the installed app, which takes separate
-authorisation: capture the same page and build twice, once hidden and once visible,
-and record per capture attempt — correlated request id and runtime tab id, the
-surface lease and `data-preview-rendering` state during the request, elapsed time
-to overlay readiness, CDP evaluation and AX-tree time, each `capturePage` attempt
-and its outcome, and the concrete desktop failure class. That distinguishes
-capture that never starts from capture that fails, stalls, or succeeds after the
-broker has given up. Verify any fix with a returned image, not a unit test.
+Both halves of that are now bounded. Every post-readiness bridge call spends
+what the readiness waits left of the request's host deadline (`raceBridgeCall`
+in `apps/web/src/components/preview/previewAutomationHostBudget.ts`), so the
+agent gets `PreviewAutomationBridgeTimeoutError` naming the operation and the
+budget it had instead of the broker's generic timeout, and the snapshot tool
+quotes our own failure message rather than hiding it
+(`apps/server/src/mcp/McpHttpServer.ts`).
 
-Until then the render check below is a measurement, not a screenshot.
+What the deadline does not do is cancel the capture. It only decides who answers
+the agent: the guest keeps working, finishes on its own, and the broker drops the
+late response. A page that blocks its main thread past the request budget still
+cannot be snapshotted, and that is the page's problem to fix, not the host's.
+
+The render check below is a measurement, not a screenshot.
 
 ## The render-check shape: a hidden 390 px iframe
 
@@ -126,6 +131,4 @@ fixed` is relative to the frame, and code that reads `window.top` or
 `visualViewport` sees the host page. It also produces no pixels, so it cannot
 catch a colour, a font fallback, or a z-order mistake.
 
-For those, ask the user to open the preview panel and try a real
-`preview_snapshot` — whether an open panel is what makes capture work is the
-open question above.
+For those, take a real `preview_snapshot`. The panel does not have to be open.
