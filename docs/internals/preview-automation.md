@@ -44,13 +44,20 @@ its 15,000 ms timeout. The host's answer reached
 `PreviewAutomationBroker.respond` 9 s after that and was dropped, so the agent
 saw one sentence with no class in it.
 
-Both halves of that are now bounded. Every post-readiness bridge call spends
-what the readiness waits left of the request's host deadline (`raceBridgeCall`
-in `apps/web/src/components/preview/previewAutomationHostBudget.ts`), so the
-agent gets `PreviewAutomationBridgeTimeoutError` naming the operation and the
-budget it had instead of the broker's generic timeout, and the snapshot tool
-quotes our own failure message rather than hiding it
-(`apps/server/src/mcp/McpHttpServer.ts`).
+Both halves of that are now bounded. Every bridge call a request makes spends
+the request's host deadline, whatever a readiness wait left of it and whether
+one ran at all (`raceBridgeCall` in
+`apps/web/src/components/preview/previewAutomationHostBudget.ts`): the
+navigation, the status reads that answer `preview_status` and close an `open` or
+a `navigate`, and every post-readiness operation. The agent gets
+`PreviewAutomationBridgeTimeoutError` naming the operation and the budget it had
+instead of the broker's generic timeout, and the snapshot tool quotes our own
+failure message rather than hiding it (`apps/server/src/mcp/McpHttpServer.ts`).
+A status is all-or-nothing on that deadline: a guest that cannot answer a
+viewport read fails the request rather than reporting a status with the viewport
+quietly missing. Only a tag one of our own classes raises is quoted back
+(`previewAutomationRemoteTag` in `packages/contracts/src/previewAutomation.ts`),
+since a host picks both tags on a response and neither is length-bounded.
 
 What the deadline does not do is cancel the capture. It only decides who answers
 the agent: the guest keeps working, finishes on its own, and the broker drops the
